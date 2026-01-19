@@ -1,0 +1,83 @@
+package cmd
+
+import (
+	"fmt"
+
+	"agmd/pkg/registry"
+
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+)
+
+var setupForce bool
+
+var setupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Initialize the agmd registry",
+	Long: `Create the ~/.agmd directory structure and install default templates.
+
+This command sets up:
+- ~/.agmd/shared/base.md (universal guidelines)
+- ~/.agmd/rules/ (rule templates)
+- ~/.agmd/workflows/ (workflow templates)
+- ~/.agmd/guidelines/ (guideline templates)
+- ~/.agmd/profiles/ (profile templates)
+
+Examples:
+  agmd setup              # Initialize registry
+  agmd setup --force      # Reinitialize (overwrites existing)`,
+	RunE: runSetup,
+}
+
+func init() {
+	rootCmd.AddCommand(setupCmd)
+	setupCmd.Flags().BoolVar(&setupForce, "force", false, "Force reinitialize (overwrites existing)")
+}
+
+func runSetup(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+	blue := color.New(color.FgBlue).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+
+	// Create registry
+	reg, err := registry.New()
+	if err != nil {
+		return fmt.Errorf("failed to create registry: %w", err)
+	}
+
+	// Check if already exists
+	if reg.Exists() && !setupForce {
+		fmt.Printf("%s Registry already exists at: %s\n", yellow("ℹ"), reg.BasePath)
+		fmt.Println("\nUse --force to reinitialize (this will overwrite existing files)")
+		return nil
+	}
+
+	if setupForce && reg.Exists() {
+		fmt.Printf("%s Reinitializing registry at: %s\n", yellow("⚠"), reg.BasePath)
+	} else {
+		fmt.Printf("%s Initializing registry at: %s\n", blue("→"), reg.BasePath)
+	}
+
+	// Setup registry
+	if err := reg.Setup(setupForce); err != nil {
+		return fmt.Errorf("setup failed: %w", err)
+	}
+
+	// Success message
+	fmt.Printf("\n%s Registry initialized successfully!\n", green("✓"))
+
+	paths := reg.Paths()
+	fmt.Println("\nCreated:")
+	fmt.Printf("  • %s (universal guidelines)\n", paths.Shared)
+	fmt.Printf("  • %s (rule templates)\n", paths.Rules)
+	fmt.Printf("  • %s (workflow templates)\n", paths.Workflows)
+	fmt.Printf("  • %s (guideline templates)\n", paths.Guidelines)
+	fmt.Printf("  • %s (profile templates)\n", paths.Profiles)
+
+	fmt.Println("\nNext steps:")
+	fmt.Println("  1. Run 'agmd init' in a project directory to create AGENTS.md")
+	fmt.Println("  2. Run 'agmd new rule <name>' to create custom rules")
+	fmt.Println("  3. Run 'agmd add rule <name>' to add rules to a project")
+
+	return nil
+}
