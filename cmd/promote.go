@@ -159,7 +159,7 @@ func promoteAllBlocks(newBlocks NewBlocksContent, directivesContent string, reg 
 			return fmt.Errorf("failed to write directives.md: %w", err)
 		}
 		fmt.Printf("\n%s Complete! %d/%d items promoted to registry and directives.md updated.\n", green("✓"), promoted, totalBlocks)
-		fmt.Printf("%s Run 'agmd generate' to update AGENTS.md\n", blue("ℹ"))
+		fmt.Printf("%s Run 'agmd sync' to update AGENTS.md\n", blue("ℹ"))
 	}
 
 	return nil
@@ -277,7 +277,7 @@ func promoteInteractive(newBlocks NewBlocksContent, directivesContent string, re
 			return fmt.Errorf("failed to write directives.md: %w", err)
 		}
 		fmt.Printf("\n%s Complete! %d items promoted to registry and directives.md updated.\n", green("✓"), promoted)
-		fmt.Printf("%s Run 'agmd generate' to update AGENTS.md\n", blue("ℹ"))
+		fmt.Printf("%s Run 'agmd sync' to update AGENTS.md\n", blue("ℹ"))
 	}
 
 	return nil
@@ -298,7 +298,7 @@ func promoteSingle(itemType, name string, directivesContent string, reg *registr
 	blue := color.New(color.FgBlue).SprintFunc()
 
 	fmt.Printf("\n%s Promoted successfully!\n", green("✓"))
-	fmt.Printf("%s Run 'agmd generate' to update AGENTS.md\n", blue("ℹ"))
+	fmt.Printf("%s Run 'agmd sync' to update AGENTS.md\n", blue("ℹ"))
 
 	return nil
 }

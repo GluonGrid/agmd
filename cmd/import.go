@@ -141,7 +141,7 @@ Steps here...
 	fmt.Println("    :::")
 	fmt.Println("  • Use @rule:name or @workflow:name to reference existing items")
 	if !projectInitialized {
-		fmt.Println("  • Run 'agmd generate' after organizing to update AGENTS.md")
+		fmt.Println("  • Run 'agmd sync' after organizing to update AGENTS.md")
 	}
 	fmt.Println()
 

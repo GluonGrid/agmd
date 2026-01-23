@@ -19,7 +19,7 @@ This removes the directive:
 - Removes from :::list:TYPE block if present
 - Removes :::include:TYPE name if present
 
-Run 'agmd generate' after removing to update AGENTS.md.
+Run 'agmd sync' after removing to update AGENTS.md.
 
 Note: This only removes the directive from directives.md.
 The item remains in the registry and can be added again later.
@@ -80,7 +80,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%s Removed %s '%s' from directives.md!\n", green("✓"), itemType, name)
-	fmt.Printf("\nRun 'agmd generate' to update AGENTS.md.\n")
+	fmt.Printf("\nRun 'agmd sync' to update AGENTS.md.\n")
 
 	return nil
 }

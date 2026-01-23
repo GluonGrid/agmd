@@ -11,11 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	directivesMdFilename = "directives.md" // Source file with directives
-	agentsMdFilename     = "AGENTS.md"     // Generated output
-)
-
 var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync and generate AGENTS.md from directives.md",

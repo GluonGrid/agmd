@@ -23,10 +23,10 @@ Without a profile, creates directives.md with:
 
 With a profile, creates directives.md from a saved template.
 
-Run 'agmd generate' to create AGENTS.md from directives.md.
+Run 'agmd sync' to create AGENTS.md from directives.md.
 
 Examples:
-  agmd init                    # Initialize with minimal template
+  agmd init                    # Initialize with default profile
   agmd init profile:svelte-kit # Initialize with svelte-kit profile`,
 	RunE: runInit,
 }
@@ -94,9 +94,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s\n", defaultProfile.Description)
 			}
 		} else {
-			// No default profile, use minimal template
-			fmt.Printf("%s Using minimal template\n", blue("ℹ"))
-			fmt.Printf("  Tip: Create a 'default' profile or use 'agmd init profile:NAME' for tech stack templates\n")
+			// Fallback: No default profile found (shouldn't happen after setup)
+			fmt.Printf("%s Using fallback template\n", blue("ℹ"))
+			fmt.Printf("  Tip: Run 'agmd setup' to create the default profile\n")
 			templateContent = registry.GetDefaultDirectivesTemplate()
 		}
 	}

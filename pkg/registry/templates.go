@@ -30,12 +30,7 @@ This section is preserved when regenerating directives.md.
 `
 }
 
-// GetMinimalProfileTemplate returns a minimal profile template (legacy)
-func GetMinimalProfileTemplate() string {
-	return GetDefaultProfileTemplate()
-}
-
-// GetDefaultDirectivesTemplate returns the default directives.md template (when no profile specified)
+// GetDefaultDirectivesTemplate returns the fallback template when no profile is found
 func GetDefaultDirectivesTemplate() string {
-	return GetMinimalProfileTemplate()
+	return GetDefaultProfileTemplate()
 }

@@ -24,7 +24,7 @@ This inserts a directive:
 - Appends to first existing :::list:TYPE block if found
 - Otherwise creates ## Section with :::include:TYPE name
 
-Run 'agmd generate' after adding to update AGENTS.MD.
+Run 'agmd sync' after adding to update AGENTS.md.
 
 Examples:
   agmd add rule:typescript       # Add TypeScript rule
@@ -109,7 +109,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%s Added %s '%s' to directives.md!\n", green("✓"), itemType, name)
-	fmt.Printf("\nRun 'agmd generate' to update AGENTS.md.\n")
+	fmt.Printf("\nRun 'agmd sync' to update AGENTS.md.\n")
 
 	return nil
 }
