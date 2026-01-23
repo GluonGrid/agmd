@@ -29,10 +29,10 @@ func (r *Registry) Paths() RegistryPaths {
 	return RegistryPaths{
 		Base:       r.BasePath,
 		Shared:     filepath.Join(r.BasePath, "shared"),
-		Rules:      filepath.Join(r.BasePath, "rules"),
-		Workflows:  filepath.Join(r.BasePath, "workflows"),
-		Guidelines: filepath.Join(r.BasePath, "guidelines"),
-		Profiles:   filepath.Join(r.BasePath, "profiles"),
+		Rules:      filepath.Join(r.BasePath, "rule"),
+		Workflows:  filepath.Join(r.BasePath, "workflow"),
+		Guidelines: filepath.Join(r.BasePath, "guideline"),
+		Profiles:   filepath.Join(r.BasePath, "profile"),
 	}
 }
 

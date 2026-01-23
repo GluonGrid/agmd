@@ -17,9 +17,9 @@ func detectNewBlocks(content string) NewBlocksContent {
 		Guidelines: []string{},
 	}
 
-	// Regex to match :::new:TYPE name=value blocks (parser syntax)
-	// Example: :::new:rule name=simple-test
-	re := regexp.MustCompile(`(?m)^:::new:(rule|workflow|guideline)\s+name=([a-z0-9/_-]+)\s*$`)
+	// Regex to match :::new TYPE:NAME blocks (parser syntax)
+	// Example: :::new rule:simple-test
+	re := regexp.MustCompile(`(?m)^:::new\s+(rule|workflow|guideline):([a-z0-9/_-]+)\s*$`)
 	matches := re.FindAllStringSubmatch(content, -1)
 
 	for _, match := range matches {

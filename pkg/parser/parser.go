@@ -36,18 +36,15 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return nil, parser.NoChildren
 	}
 
-	// Match :::include:TYPE name (treat as having children to force Continue to be called)
-	// Example: :::include:rule typescript
-	includeRe := regexp.MustCompile(`^:::include:([a-z0-9-]+)\s+([a-z0-9-]+)`)
+	// Match :::include TYPE:NAME (treat as having children to force Continue to be called)
+	// Example: :::include rule:typescript
+	includeRe := regexp.MustCompile(`^:::include\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
 	if match := includeRe.FindSubmatch(line); match != nil {
 		itemType := string(match[1]) // "rule", "workflow"
 		name := string(match[2])      // "typescript"
 
-		// Pluralize type for folder name
-		folderName := pluralize(itemType)
-
 		// Create a single-item list block
-		node := NewListBlock(folderName)
+		node := NewListBlock(itemType)
 		node.Names = []string{name}
 		node.IsSingleItem = true
 
@@ -64,18 +61,18 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return node, parser.NoChildren | parser.Continue
 	}
 
-	// Match :::list:TYPE (multi-line, needs :::end)
-	// Example: :::list:rules
-	listRe := regexp.MustCompile(`^:::list:([a-z0-9-]+)`)
+	// Match :::list TYPE (multi-line, needs :::end)
+	// Example: :::list rule
+	listRe := regexp.MustCompile(`^:::list\s+([a-z0-9-]+)`)
 	if match := listRe.FindSubmatch(line); match != nil {
-		itemType := string(match[1]) // "rules", "workflows"
+		itemType := string(match[1]) // "rule", "workflow"
 
 		node := NewListBlock(itemType)
 		node.IsSingleItem = false
 
 		pc.Set(directiveDataKey, &directiveData{node})
 
-		// Advance past the :::list:TYPE line
+		// Advance past the :::list TYPE line
 		newline := 1
 		if len(line) > 0 && line[len(line)-1] != '\n' {
 			newline = 0
@@ -84,9 +81,9 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return node, parser.NoChildren
 	}
 
-	// Match :::new:TYPE name=foo (inline definition, needs :::end)
-	// Example: :::new:rule name=my-auth-rule
-	newRe := regexp.MustCompile(`^:::new:([a-z0-9-]+)\s+name=([a-z0-9-]+)`)
+	// Match :::new TYPE:NAME (inline definition, needs :::end)
+	// Example: :::new rule:my-auth-rule
+	newRe := regexp.MustCompile(`^:::new\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
 	if match := newRe.FindSubmatch(line); match != nil {
 		itemType := string(match[1]) // "rule", "workflow"
 		name := string(match[2])      // "my-auth-rule"
@@ -163,13 +160,4 @@ func (b *directiveParser) CanInterruptParagraph() bool {
 
 func (b *directiveParser) CanAcceptIndentedLine() bool {
 	return false
-}
-
-// pluralize converts singular type to plural folder name
-// rule -> rules, workflow -> workflows
-func pluralize(s string) string {
-	if len(s) > 0 && s[len(s)-1] != 's' {
-		return s + "s"
-	}
-	return s
 }

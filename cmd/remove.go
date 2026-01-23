@@ -16,7 +16,7 @@ var removeCmd = &cobra.Command{
 	Short: "Remove a rule, workflow, or guideline from directives.md",
 	Long: `Remove a rule, workflow, or guideline from directives.md.
 This removes the directive:
-- Removes from :::list:TYPE block if present
+- Removes from :::list TYPE block if present
 - Removes :::include:TYPE name if present
 
 Run 'agmd sync' after removing to update AGENTS.md.

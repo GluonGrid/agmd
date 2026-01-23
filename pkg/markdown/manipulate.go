@@ -9,14 +9,11 @@ import (
 )
 
 // AddToDirective adds an item to AGENTS.md by either:
-// 1. Appending to first existing :::list:TYPE block
-// 2. Creating a new ## Section with :::include:TYPE name
+// 1. Appending to first existing :::list TYPE block
+// 2. Creating a new ## Section with :::include TYPE:name
 func AddToDirective(content []byte, itemType, name string) ([]byte, error) {
-	// Pluralize type for list blocks
-	listType := pluralize(itemType)
-
-	// Try to find existing :::list:TYPE block
-	listPattern := regexp.MustCompile(`(?m)^:::list:` + regexp.QuoteMeta(listType) + `$`)
+	// Try to find existing :::list TYPE block
+	listPattern := regexp.MustCompile(`(?m)^:::list\s+` + regexp.QuoteMeta(itemType) + `$`)
 	endPattern := regexp.MustCompile(`(?m)^:::end$`)
 
 	listMatch := listPattern.FindIndex(content)
@@ -25,7 +22,7 @@ func AddToDirective(content []byte, itemType, name string) ([]byte, error) {
 		searchStart := listMatch[1]
 		endMatch := endPattern.FindIndex(content[searchStart:])
 		if endMatch == nil {
-			return nil, fmt.Errorf("found :::list:%s but no matching :::end", listType)
+			return nil, fmt.Errorf("found :::list %s but no matching :::end", itemType)
 		}
 
 		// Insert name before :::end
@@ -45,8 +42,8 @@ func AddToDirective(content []byte, itemType, name string) ([]byte, error) {
 	}
 
 	// No list found - create ## Section with :::include
-	sectionTitle := strings.Title(listType)
-	includeDirective := fmt.Sprintf(":::include:%s %s", itemType, name)
+	sectionTitle := strings.Title(itemType)
+	includeDirective := fmt.Sprintf(":::include %s:%s", itemType, name)
 
 	// Check if include already exists
 	includePattern := regexp.MustCompile(`(?m)^:::include:` + regexp.QuoteMeta(itemType) + `\s+` + regexp.QuoteMeta(name) + `$`)
@@ -68,13 +65,11 @@ func AddToDirective(content []byte, itemType, name string) ([]byte, error) {
 }
 
 // RemoveFromDirective removes an item from AGENTS.md by:
-// 1. Removing from :::list:TYPE block if present
-// 2. Removing :::include:TYPE name line if present
+// 1. Removing from :::list TYPE block if present
+// 2. Removing :::include TYPE:name line if present
 func RemoveFromDirective(content []byte, itemType, name string) ([]byte, error) {
-	listType := pluralize(itemType)
-
-	// Try to remove from :::list:TYPE block first
-	listPattern := regexp.MustCompile(`(?m)^:::list:` + regexp.QuoteMeta(listType) + `$`)
+	// Try to remove from :::list TYPE block first
+	listPattern := regexp.MustCompile(`(?m)^:::list\s+` + regexp.QuoteMeta(itemType) + `$`)
 	endPattern := regexp.MustCompile(`(?m)^:::end$`)
 
 	listMatch := listPattern.FindIndex(content)
@@ -105,14 +100,6 @@ func RemoveFromDirective(content []byte, itemType, name string) ([]byte, error) 
 	}
 
 	return nil, fmt.Errorf("%s '%s' not found in AGENTS.md", itemType, name)
-}
-
-// pluralize converts singular type to plural
-func pluralize(s string) string {
-	if len(s) > 0 && s[len(s)-1] != 's' {
-		return s + "s"
-	}
-	return s
 }
 
 // containsLine checks if a line exists in content

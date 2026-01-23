@@ -306,14 +306,14 @@ func promoteSingle(itemType, name string, directivesContent string, reg *registr
 func promoteSingleToRegistry(itemType, name string, directivesContent string, reg *registry.Registry) (string, error) {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	// Extract :::new:TYPE name=value block content (parser syntax)
-	// Example: :::new:rule name=simple-test
-	blockPattern := fmt.Sprintf(`(?s):::new:%s\s+name=%s\s*\n(.*?)\n:::`, regexp.QuoteMeta(itemType), regexp.QuoteMeta(name))
+	// Extract :::new TYPE:NAME block content (parser syntax)
+	// Example: :::new rule:simple-test
+	blockPattern := fmt.Sprintf(`(?s):::new\s+%s:%s\s*\n(.*?)\n:::`, regexp.QuoteMeta(itemType), regexp.QuoteMeta(name))
 	re := regexp.MustCompile(blockPattern)
 	match := re.FindStringSubmatch(directivesContent)
 
 	if match == nil {
-		return "", fmt.Errorf("could not find :::new:%s name=%s block", itemType, name)
+		return "", fmt.Errorf("could not find :::new %s:%s block", itemType, name)
 	}
 
 	blockContent := strings.TrimSpace(match[1])
@@ -369,10 +369,10 @@ description: ""
 	fmt.Printf("%s Created %s at %s\n", green("✓"), itemType, filePath)
 
 	// Replace :::new block with :::include directive in directives.md
-	replacement := fmt.Sprintf(":::include:%s %s", itemType, name)
+	replacement := fmt.Sprintf(":::include %s:%s", itemType, name)
 	updatedContent := strings.Replace(directivesContent, fullMatch, replacement, 1)
 
-	fmt.Printf("%s Replaced :::new block with :::include:%s %s\n", green("✓"), itemType, name)
+	fmt.Printf("%s Replaced :::new block with :::include %s:%s\n", green("✓"), itemType, name)
 
 	return updatedContent, nil
 }

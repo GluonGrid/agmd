@@ -21,7 +21,7 @@ var addCmd = &cobra.Command{
 	Short: "Add a rule, workflow, or guideline to directives.md",
 	Long: `Add a rule, workflow, or guideline from the registry to directives.md.
 This inserts a directive:
-- Appends to first existing :::list:TYPE block if found
+- Appends to first existing :::list TYPE block if found
 - Otherwise creates ## Section with :::include:TYPE name
 
 Run 'agmd sync' after adding to update AGENTS.md.

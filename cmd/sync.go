@@ -22,9 +22,9 @@ The command:
 3. Writes expanded output to AGENTS.md
 
 Processes:
-- :::include:TYPE name directives
-- :::list:TYPE blocks
-- :::new:TYPE name=value blocks
+- :::include TYPE:NAME directives
+- :::list TYPE blocks
+- :::new TYPE:NAME blocks
 
 All non-directive content is preserved.
 

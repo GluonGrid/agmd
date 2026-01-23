@@ -4,7 +4,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 )
 
-// ListBlock represents :::list:TYPE ... :::end or :::include:TYPE name
+// ListBlock represents :::list TYPE ... :::end or :::include:TYPE name
 type ListBlock struct {
 	ast.BaseBlock
 	ItemType     string   // "rules", "workflows", "guidelines"

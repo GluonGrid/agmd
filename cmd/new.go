@@ -426,7 +426,8 @@ func createProfile(name string, reg *registry.Registry) error {
 	referencedRules := make(map[string]bool)
 	referencedWorkflows := make(map[string]bool)
 	referencedGuidelines := make(map[string]bool)
-	extractActiveItems(contentStr, referencedRules, referencedWorkflows, referencedGuidelines)
+	referencedCustomTypes := make(map[string]map[string]bool)
+	extractActiveItems(contentStr, referencedRules, referencedWorkflows, referencedGuidelines, referencedCustomTypes)
 
 	// Check if all referenced items exist in registry
 	var missingItems []string

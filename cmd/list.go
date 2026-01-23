@@ -14,9 +14,9 @@ import (
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List available and active rules, workflows, and guidelines",
-	Long: `List all rules, workflows, and guidelines in the registry.
-Shows which items are active in the current project (if agents.toml exists).
+	Short: "List all available registry items including custom types",
+	Long: `List all items in the registry including rules, workflows, guidelines, profiles, and custom types.
+Shows which items are active in the current project (if directives.md exists).
 
 Examples:
   agmd list           # List all available content`,
@@ -47,13 +47,14 @@ func runList(cmd *cobra.Command, args []string) error {
 	activeRules := make(map[string]bool)
 	activeWorkflows := make(map[string]bool)
 	activeGuidelines := make(map[string]bool)
+	activeCustomTypes := make(map[string]map[string]bool) // type -> name -> bool
 	hasProject := false
 
 	if _, err := os.Stat(directivesMdFilename); err == nil {
 		hasProject = true
 		content, err := os.ReadFile(directivesMdFilename)
 		if err == nil {
-			extractActiveItems(string(content), activeRules, activeWorkflows, activeGuidelines)
+			extractActiveItems(string(content), activeRules, activeWorkflows, activeGuidelines, activeCustomTypes)
 		}
 	}
 
@@ -153,9 +154,46 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	// List custom types (any directories in registry that aren't standard types)
+	customTypes, err := listCustomTypes(reg.BasePath)
+	if err == nil && len(customTypes) > 0 {
+		fmt.Printf("%s Custom Types:\n", cyan("●"))
+		for typeName, items := range customTypes {
+			activeCount := 0
+			if hasProject && activeCustomTypes[typeName] != nil {
+				activeCount = len(activeCustomTypes[typeName])
+			}
+
+			if activeCount > 0 {
+				fmt.Printf("  %s (%d items, %d active)\n", typeName, len(items), activeCount)
+			} else {
+				fmt.Printf("  %s (%d items)\n", typeName, len(items))
+			}
+
+			for _, item := range items {
+				isActive := hasProject && activeCustomTypes[typeName] != nil && activeCustomTypes[typeName][item]
+				if isActive {
+					fmt.Printf("    %s %s (active)\n", green("✓"), item)
+				} else {
+					fmt.Printf("    %s\n", item)
+				}
+			}
+		}
+		fmt.Println()
+	}
+
 	if hasProject {
-		fmt.Printf("%s Active in current project: %d rules, %d workflows, %d guidelines\n",
-			blue("ℹ"), len(activeRules), len(activeWorkflows), len(activeGuidelines))
+		summary := fmt.Sprintf("%d rules, %d workflows, %d guidelines",
+			len(activeRules), len(activeWorkflows), len(activeGuidelines))
+
+		// Add custom types to summary
+		for typeName, items := range activeCustomTypes {
+			if len(items) > 0 {
+				summary += fmt.Sprintf(", %d %s", len(items), typeName)
+			}
+		}
+
+		fmt.Printf("%s Active in current project: %s\n", blue("ℹ"), summary)
 	} else {
 		fmt.Printf("%s No project found in current directory (run 'agmd init' to create one)\n", yellow("ℹ"))
 	}
@@ -164,9 +202,9 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 // extractActiveItems parses directives.md content and extracts active items
-func extractActiveItems(content string, rules, workflows, guidelines map[string]bool) {
-	// Match :::include:TYPE name
-	includeRe := regexp.MustCompile(`(?m)^:::include:(rule|workflow|guideline)\s+([a-z0-9/_-]+)`)
+func extractActiveItems(content string, rules, workflows, guidelines map[string]bool, customTypes map[string]map[string]bool) {
+	// Match :::include TYPE:NAME (for any type)
+	includeRe := regexp.MustCompile(`(?m)^:::include\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
 	matches := includeRe.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
 		if len(match) >= 3 {
@@ -179,12 +217,18 @@ func extractActiveItems(content string, rules, workflows, guidelines map[string]
 				workflows[name] = true
 			case "guideline":
 				guidelines[name] = true
+			default:
+				// Custom type
+				if customTypes[itemType] == nil {
+					customTypes[itemType] = make(map[string]bool)
+				}
+				customTypes[itemType][name] = true
 			}
 		}
 	}
 
-	// Match :::list:TYPE blocks
-	listRe := regexp.MustCompile(`(?s):::list:(rules|workflows|guidelines)\s*\n(.*?)\n:::end`)
+	// Match :::list TYPE blocks (accept any type)
+	listRe := regexp.MustCompile(`(?s):::list\s+([a-z0-9-]+)\s*\n(.*?)\n:::end`)
 	listMatches := listRe.FindAllStringSubmatch(content, -1)
 	for _, match := range listMatches {
 		if len(match) >= 3 {
@@ -197,14 +241,66 @@ func extractActiveItems(content string, rules, workflows, guidelines map[string]
 					continue
 				}
 				switch listType {
-				case "rules":
+				case "rule":
 					rules[name] = true
-				case "workflows":
+				case "workflow":
 					workflows[name] = true
-				case "guidelines":
+				case "guideline":
 					guidelines[name] = true
+				default:
+					// Handle custom types - we don't track them in separate maps for now
+					// They'll be picked up by listCustomTypes() from the filesystem
 				}
 			}
 		}
 	}
+}
+
+// listCustomTypes scans registry for custom type directories (excluding profiles and shared)
+func listCustomTypes(basePath string) (map[string][]string, error) {
+	result := make(map[string][]string)
+	excludedDirs := map[string]bool{
+		"profile": true, // profiles are special - not content types
+		"shared":  true, // shared is for common resources
+	}
+
+	// Read registry directory
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find all type directories
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		typeName := entry.Name()
+		if excludedDirs[typeName] {
+			continue
+		}
+
+		// Read items in custom type directory
+		typePath := fmt.Sprintf("%s/%s", basePath, typeName)
+		items, err := os.ReadDir(typePath)
+		if err != nil {
+			continue
+		}
+
+		var itemNames []string
+		for _, item := range items {
+			if !item.IsDir() && strings.HasSuffix(item.Name(), ".md") {
+				// Remove .md extension
+				name := strings.TrimSuffix(item.Name(), ".md")
+				itemNames = append(itemNames, name)
+			}
+		}
+
+		if len(itemNames) > 0 {
+			result[typeName] = itemNames
+		}
+	}
+
+	return result, nil
 }
