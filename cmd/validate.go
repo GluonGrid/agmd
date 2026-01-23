@@ -4,10 +4,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strings"
-
-	"agmd/pkg/registry"
-	"agmd/pkg/state"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -15,24 +11,24 @@ import (
 
 var validateCmd = &cobra.Command{
 	Use:   "validate",
-	Short: "Validate AGENTS.md for unregistered content",
-	Long: `Validate AGENTS.md by checking for content in the managed section
-that is not registered in the registry or listed in agents.toml.
+	Short: "Validate directives.md for :::new blocks ready to promote",
+	Long: `Validate directives.md by detecting :::new blocks that define
+new rules, workflows, or guidelines that can be promoted to the registry.
 
 This is useful after:
 - Importing existing configuration (agmd import)
-- Manually adding rules/workflows to the managed section
-- Organizing content from custom to managed sections
+- Manually adding :::new blocks to directives.md
+- Organizing content from imported files
 
 The validator will detect patterns like:
-- ### rule-name (unregistered rules)
-- ### workflow-name (unregistered workflows)
-- ### guideline-name (unregistered guidelines)
+- :::new rule:name ... ::: (new rule definitions)
+- :::new workflow:name ... ::: (new workflow definitions)
+- :::new guideline:name ... ::: (new guideline definitions)
 
-And suggest either promoting them to the registry or moving to custom section.
+And suggest promoting them to the registry using 'agmd promote'.
 
 Examples:
-  agmd validate           # Check for unregistered content`,
+  agmd validate           # Check for :::new blocks in directives.md`,
 	RunE: runValidate,
 }
 
@@ -46,191 +42,106 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	blue := color.New(color.FgBlue).SprintFunc()
 	cyan := color.New(color.FgCyan).SprintFunc()
 
-	fmt.Printf("%s Validating AGENTS.md...\n", blue("→"))
+	fmt.Printf("%s Validating directives.md...\n", blue("→"))
 
-	// Check if AGENTS.md exists
-	if _, err := os.Stat(agentsMdFilename); os.IsNotExist(err) {
-		return fmt.Errorf("AGENTS.md not found. Run 'agmd init' or 'agmd import' first")
+	// Check if directives.md exists
+	if _, err := os.Stat(directivesMdFilename); os.IsNotExist(err) {
+		return fmt.Errorf("directives.md not found. Run 'agmd init' first")
 	}
 
-	// Check if agents.toml exists
-	if _, err := os.Stat(agentsTomlFilename); os.IsNotExist(err) {
-		return fmt.Errorf("agents.toml not found. Run 'agmd init' first")
-	}
-
-	// Load state
-	st, err := state.Load(agentsTomlFilename)
+	// Read directives.md
+	content, err := os.ReadFile(directivesMdFilename)
 	if err != nil {
-		return fmt.Errorf("failed to load agents.toml: %w", err)
+		return fmt.Errorf("failed to read directives.md: %w", err)
 	}
 
-	// Load registry
-	reg, err := registry.New()
-	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
-	}
+	// Detect :::new blocks
+	newBlocks := detectNewBlocks(string(content))
 
-	// Read AGENTS.md
-	content, err := os.ReadFile(agentsMdFilename)
-	if err != nil {
-		return fmt.Errorf("failed to read AGENTS.md: %w", err)
-	}
-
-	// Extract managed section
-	managedContent := extractManagedSection(string(content))
-	if managedContent == "" {
-		return fmt.Errorf("could not find managed section in AGENTS.md")
-	}
-
-	// Detect unregistered content
-	unregistered := detectUnregistered(managedContent, st, reg)
-
-	if len(unregistered.Rules) == 0 && len(unregistered.Workflows) == 0 && len(unregistered.Guidelines) == 0 {
-		fmt.Printf("\n%s No unregistered content detected!\n", green("✓"))
-		fmt.Println("\nAll content in managed section is properly registered.")
+	if len(newBlocks.Rules) == 0 && len(newBlocks.Workflows) == 0 && len(newBlocks.Guidelines) == 0 {
+		fmt.Printf("\n%s No :::new blocks found in directives.md\n", green("✓"))
+		fmt.Println("\nAll content is either referenced from registry or inline.")
 		return nil
 	}
 
 	// Report findings
-	fmt.Printf("\n%s Found unregistered content in managed section:\n\n", yellow("⚠"))
+	fmt.Printf("\n%s Found :::new blocks ready to promote:\n\n", yellow("ℹ"))
 
-	if len(unregistered.Rules) > 0 {
-		fmt.Printf("%s Rules (%d):\n", cyan("●"), len(unregistered.Rules))
-		for _, name := range unregistered.Rules {
-			fmt.Printf("  • %s (not in registry)\n", name)
+	if len(newBlocks.Rules) > 0 {
+		fmt.Printf("%s Rules (%d):\n", cyan("●"), len(newBlocks.Rules))
+		for _, name := range newBlocks.Rules {
+			fmt.Printf("  • %s\n", name)
 		}
 		fmt.Println()
 	}
 
-	if len(unregistered.Workflows) > 0 {
-		fmt.Printf("%s Workflows (%d):\n", cyan("●"), len(unregistered.Workflows))
-		for _, name := range unregistered.Workflows {
-			fmt.Printf("  • %s (not in registry)\n", name)
+	if len(newBlocks.Workflows) > 0 {
+		fmt.Printf("%s Workflows (%d):\n", cyan("●"), len(newBlocks.Workflows))
+		for _, name := range newBlocks.Workflows {
+			fmt.Printf("  • %s\n", name)
 		}
 		fmt.Println()
 	}
 
-	if len(unregistered.Guidelines) > 0 {
-		fmt.Printf("%s Guidelines (%d):\n", cyan("●"), len(unregistered.Guidelines))
-		for _, name := range unregistered.Guidelines {
-			fmt.Printf("  • %s (not in registry)\n", name)
+	if len(newBlocks.Guidelines) > 0 {
+		fmt.Printf("%s Guidelines (%d):\n", cyan("●"), len(newBlocks.Guidelines))
+		for _, name := range newBlocks.Guidelines {
+			fmt.Printf("  • %s\n", name)
 		}
 		fmt.Println()
 	}
 
-	fmt.Println("Options:")
-	fmt.Println("  1. Promote to registry:")
-	fmt.Printf("     %s\n", blue("agmd promote"))
+	fmt.Println("Next step:")
+	fmt.Printf("  • Promote these to the registry: %s\n", blue("agmd promote"))
 	fmt.Println()
-	fmt.Println("  2. Move to custom section:")
-	fmt.Printf("     Manually move content between markers:\n")
-	fmt.Printf("     %s and %s\n", yellow("<!-- agmd:custom-start -->"), yellow("<!-- agmd:custom-end -->"))
-	fmt.Println()
-	fmt.Printf("%s Tip: Content in custom section doesn't require registration\n", blue("ℹ"))
+	fmt.Printf("%s Tip: 'agmd promote' will save them to ~/.agmd/ and replace :::new blocks with @references\n", blue("ℹ"))
 
-	return fmt.Errorf("validation found unregistered content")
+	return nil
 }
 
-type UnregisteredContent struct {
+type NewBlocksContent struct {
 	Rules      []string
 	Workflows  []string
 	Guidelines []string
 }
 
-// extractManagedSection extracts content between managed markers
-func extractManagedSection(content string) string {
-	startMarker := "<!-- agmd:managed-start -->"
-	endMarker := "<!-- agmd:managed-end -->"
-
-	// Find LAST occurrence (actual markers, not examples in rules)
-	startIdx := strings.LastIndex(content, startMarker)
-	if startIdx == -1 {
-		return ""
-	}
-
-	endIdx := strings.Index(content[startIdx:], endMarker)
-	if endIdx == -1 {
-		return ""
-	}
-
-	return content[startIdx : startIdx+endIdx]
-}
-
-// detectUnregistered scans managed section for ### headings and checks if they exist
-func detectUnregistered(managedContent string, st *state.ProjectState, reg *registry.Registry) UnregisteredContent {
-	result := UnregisteredContent{
+// detectNewBlocks scans directives.md for :::new markers
+func detectNewBlocks(content string) NewBlocksContent {
+	result := NewBlocksContent{
 		Rules:      []string{},
 		Workflows:  []string{},
 		Guidelines: []string{},
 	}
 
-	// Regex to match ### heading-name patterns
-	re := regexp.MustCompile(`(?m)^### ([a-z0-9-]+)\s*$`)
-	matches := re.FindAllStringSubmatch(managedContent, -1)
+	// Regex to match :::new:TYPE name=value blocks (parser syntax)
+	// Example: :::new:rule name=simple-test
+	re := regexp.MustCompile(`(?m)^:::new:(rule|workflow|guideline)\s+name=([a-z0-9/_-]+)\s*$`)
+	matches := re.FindAllStringSubmatch(content, -1)
 
 	for _, match := range matches {
-		if len(match) < 2 {
+		if len(match) < 3 {
 			continue
 		}
-		name := match[1]
-
-		// Determine type based on section
-		itemType := determineType(managedContent, match[0])
+		itemType := match[1]
+		name := match[2]
 
 		switch itemType {
 		case "rule":
-			// Check if in registry
-			if _, err := reg.GetRule(name); err != nil {
-				// Not in registry - check if it's supposed to be (in agents.toml but missing)
-				if !contains(result.Rules, name) {
-					result.Rules = append(result.Rules, name)
-				}
+			if !contains(result.Rules, name) {
+				result.Rules = append(result.Rules, name)
 			}
 		case "workflow":
-			if _, err := reg.GetWorkflow(name); err != nil {
-				if !contains(result.Workflows, name) {
-					result.Workflows = append(result.Workflows, name)
-				}
+			if !contains(result.Workflows, name) {
+				result.Workflows = append(result.Workflows, name)
 			}
 		case "guideline":
-			if _, err := reg.GetGuideline(name); err != nil {
-				if !contains(result.Guidelines, name) {
-					result.Guidelines = append(result.Guidelines, name)
-				}
+			if !contains(result.Guidelines, name) {
+				result.Guidelines = append(result.Guidelines, name)
 			}
 		}
 	}
 
 	return result
-}
-
-// determineType determines if a ### heading is in Rules, Workflows, or Guidelines section
-func determineType(content, heading string) string {
-	headingPos := strings.Index(content, heading)
-	if headingPos == -1 {
-		return ""
-	}
-
-	beforeHeading := content[:headingPos]
-
-	// Find the last ## section heading before this ### heading
-	rulesPos := strings.LastIndex(beforeHeading, "## Rules")
-	workflowsPos := strings.LastIndex(beforeHeading, "## Workflows")
-	guidelinesPos := strings.LastIndex(beforeHeading, "## Guidelines")
-
-	// Determine which section we're in based on most recent ## heading
-	maxPos := rulesPos
-	sectionType := "rule"
-
-	if workflowsPos > maxPos {
-		maxPos = workflowsPos
-		sectionType = "workflow"
-	}
-	if guidelinesPos > maxPos {
-		sectionType = "guideline"
-	}
-
-	return sectionType
 }
 
 func contains(slice []string, item string) bool {

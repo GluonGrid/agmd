@@ -6,27 +6,35 @@ import (
 
 	"agmd/pkg/generator"
 	"agmd/pkg/registry"
-	"agmd/pkg/state"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
 const (
-	agentsMdFilename  = "AGENTS.md"
-	agentsTomlFilename = "agents.toml"
+	directivesMdFilename = "directives.md" // Source file with directives
+	agentsMdFilename     = "AGENTS.md"     // Generated output
 )
 
 var generateCmd = &cobra.Command{
 	Use:   "generate",
-	Short: "Generate AGENTS.md from registry and state",
-	Long: `Generate or regenerate AGENTS.md based on:
-- Active rules/workflows/guidelines in agents.toml
-- Content from ~/.agmd/ registry
-- Preserving custom sections
+	Short: "Generate AGENTS.md from directives.md",
+	Long: `Read directives.md and generate expanded AGENTS.md for AI agents.
+
+The command:
+1. Reads directives.md (source file with directives)
+2. Expands all directives with content from registry
+3. Writes expanded output to AGENTS.md
+
+Processes:
+- :::include:TYPE name directives
+- :::list:TYPE blocks
+- :::new:TYPE name=value blocks
+
+All non-directive content is preserved.
 
 Examples:
-  agmd generate           # Regenerate AGENTS.md`,
+  agmd generate           # Generate AGENTS.md from directives.md`,
 	RunE: runGenerate,
 }
 
@@ -37,18 +45,16 @@ func init() {
 func runGenerate(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
-	yellow := color.New(color.FgYellow).SprintFunc()
 
-	fmt.Printf("%s Generating AGENTS.md...\n", blue("→"))
+	fmt.Printf("%s Generating AGENTS.md from directives.md...\n", blue("→"))
 
-	// Load state
-	fmt.Printf("%s Loading agents.toml...\n", blue("→"))
-	st, err := state.Load(agentsTomlFilename)
-	if err != nil {
-		return fmt.Errorf("failed to load agents.toml: %w\nRun 'agmd init' first", err)
+	// Check if directives.md exists
+	if _, err := os.Stat(directivesMdFilename); err != nil {
+		return fmt.Errorf("directives.md not found\nRun 'agmd init' first")
 	}
 
 	// Load registry
+	fmt.Printf("%s Loading registry...\n", blue("→"))
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
@@ -59,56 +65,22 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create generator
-	gen := generator.New(reg, st)
+	gen := generator.New(reg, nil)
 
-	// Check if AGENTS.md exists
-	var content string
-	if _, err := os.Stat(agentsMdFilename); err == nil {
-		// Exists - preserve custom section
-		fmt.Printf("%s Preserving custom sections...\n", blue("→"))
-		content, err = gen.GeneratePreservingCustom(agentsMdFilename)
-		if err != nil {
-			return fmt.Errorf("failed to generate AGENTS.md: %w", err)
-		}
-	} else {
-		// Doesn't exist - create new
-		content, err = gen.Generate()
-		if err != nil {
-			return fmt.Errorf("failed to generate AGENTS.md: %w", err)
-		}
+	// Parse and expand directives from directives.md
+	fmt.Printf("%s Parsing and expanding directives...\n", blue("→"))
+	content, err := gen.ParseAndExpand(directivesMdFilename)
+	if err != nil {
+		return fmt.Errorf("failed to parse and expand directives.md: %w", err)
 	}
 
-	// Write AGENTS.md
+	// Write expanded output to AGENTS.md
 	if err := os.WriteFile(agentsMdFilename, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)
 	}
 
 	fmt.Printf("\n%s Generated AGENTS.md successfully!\n", green("✓"))
-
-	// Show summary
-	fmt.Println("\nActive content:")
-	if len(st.Rules) > 0 {
-		fmt.Printf("  • Rules: %d\n", len(st.Rules))
-		for _, rule := range st.Rules {
-			fmt.Printf("    - %s\n", rule)
-		}
-	}
-	if len(st.Workflows) > 0 {
-		fmt.Printf("  • Workflows: %d\n", len(st.Workflows))
-		for _, workflow := range st.Workflows {
-			fmt.Printf("    - %s\n", workflow)
-		}
-	}
-	if len(st.Guidelines) > 0 {
-		fmt.Printf("  • Guidelines: %d\n", len(st.Guidelines))
-		for _, guideline := range st.Guidelines {
-			fmt.Printf("    - %s\n", guideline)
-		}
-	}
-
-	if len(st.Rules) == 0 && len(st.Workflows) == 0 && len(st.Guidelines) == 0 {
-		fmt.Printf("  %s No active content. Use 'agmd add rule <name>' to add rules.\n", yellow("ℹ"))
-	}
+	fmt.Printf("%s Source: %s → Output: %s\n", blue("ℹ"), directivesMdFilename, agentsMdFilename)
 
 	return nil
 }

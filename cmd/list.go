@@ -3,9 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"agmd/pkg/registry"
-	"agmd/pkg/state"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -42,13 +43,17 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
 
-	// Load project state if it exists
-	var st *state.ProjectState
+	// Load active items from directives.md if it exists
+	activeRules := make(map[string]bool)
+	activeWorkflows := make(map[string]bool)
+	activeGuidelines := make(map[string]bool)
 	hasProject := false
-	if _, err := os.Stat(agentsTomlFilename); err == nil {
-		st, err = state.Load(agentsTomlFilename)
+
+	if _, err := os.Stat(directivesMdFilename); err == nil {
+		hasProject = true
+		content, err := os.ReadFile(directivesMdFilename)
 		if err == nil {
-			hasProject = true
+			extractActiveItems(string(content), activeRules, activeWorkflows, activeGuidelines)
 		}
 	}
 
@@ -65,7 +70,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s No rules in registry\n", yellow("ℹ"))
 	} else {
 		for _, rule := range rules {
-			isActive := hasProject && st.HasRule(rule.Name)
+			isActive := hasProject && activeRules[rule.Name]
 			if isActive {
 				fmt.Printf("  %s %s (active)\n", green("✓"), rule.Name)
 			} else {
@@ -89,7 +94,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s No workflows in registry\n", yellow("ℹ"))
 	} else {
 		for _, workflow := range workflows {
-			isActive := hasProject && st.HasWorkflow(workflow.Name)
+			isActive := hasProject && activeWorkflows[workflow.Name]
 			if isActive {
 				fmt.Printf("  %s %s (active)\n", green("✓"), workflow.Name)
 			} else {
@@ -113,7 +118,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s No guidelines in registry\n", yellow("ℹ"))
 	} else {
 		for _, guideline := range guidelines {
-			isActive := hasProject && st.HasGuideline(guideline.Name)
+			isActive := hasProject && activeGuidelines[guideline.Name]
 			if isActive {
 				fmt.Printf("  %s %s (active)\n", green("✓"), guideline.Name)
 			} else {
@@ -128,10 +133,56 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	if hasProject {
 		fmt.Printf("%s Active in current project: %d rules, %d workflows, %d guidelines\n",
-			blue("ℹ"), len(st.Rules), len(st.Workflows), len(st.Guidelines))
+			blue("ℹ"), len(activeRules), len(activeWorkflows), len(activeGuidelines))
 	} else {
 		fmt.Printf("%s No project found in current directory (run 'agmd init' to create one)\n", yellow("ℹ"))
 	}
 
 	return nil
+}
+
+// extractActiveItems parses directives.md content and extracts active items
+func extractActiveItems(content string, rules, workflows, guidelines map[string]bool) {
+	// Match :::include:TYPE name
+	includeRe := regexp.MustCompile(`(?m)^:::include:(rule|workflow|guideline)\s+([a-z0-9/_-]+)`)
+	matches := includeRe.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) >= 3 {
+			itemType := match[1]
+			name := match[2]
+			switch itemType {
+			case "rule":
+				rules[name] = true
+			case "workflow":
+				workflows[name] = true
+			case "guideline":
+				guidelines[name] = true
+			}
+		}
+	}
+
+	// Match :::list:TYPE blocks
+	listRe := regexp.MustCompile(`(?s):::list:(rules|workflows|guidelines)\s*\n(.*?)\n:::end`)
+	listMatches := listRe.FindAllStringSubmatch(content, -1)
+	for _, match := range listMatches {
+		if len(match) >= 3 {
+			listType := match[1]
+			items := match[2]
+			lines := strings.Split(items, "\n")
+			for _, line := range lines {
+				name := strings.TrimSpace(line)
+				if name == "" {
+					continue
+				}
+				switch listType {
+				case "rules":
+					rules[name] = true
+				case "workflows":
+					workflows[name] = true
+				case "guidelines":
+					guidelines[name] = true
+				}
+			}
+		}
+	}
 }

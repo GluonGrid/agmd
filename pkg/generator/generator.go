@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"agmd/pkg/parser"
 	"agmd/pkg/registry"
 	"agmd/pkg/state"
 )
@@ -203,4 +204,22 @@ func formatAsSubsection(name, content string) string {
 	builder.WriteString(strings.TrimSpace(content))
 	builder.WriteString("\n\n")
 	return builder.String()
+}
+
+// ParseAndExpand reads AGENTS.md with directives, expands them from registry, and returns the result
+// This is the new directive-based generation method that replaces the TOML-based approach
+func (g *Generator) ParseAndExpand(inputPath string) (string, error) {
+	// Read the AGENTS.md file (which contains directives)
+	content, err := os.ReadFile(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", inputPath, err)
+	}
+
+	// Use the parser to expand directives
+	expanded, err := parser.ParseAndExpand(content, g.Registry.GetBasePath())
+	if err != nil {
+		return "", fmt.Errorf("failed to parse and expand directives: %w", err)
+	}
+
+	return string(expanded), nil
 }

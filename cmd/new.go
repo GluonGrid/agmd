@@ -15,7 +15,7 @@ import (
 )
 
 var newCmd = &cobra.Command{
-	Use:   "new [type] [name]",
+	Use:   "new [type:name]",
 	Short: "Create a new rule, workflow, or guideline in the registry",
 	Long: `Create a new rule, workflow, or guideline and save it to the ~/.agmd/ registry.
 
@@ -23,12 +23,18 @@ Types:
   rule       - Create a new rule
   workflow   - Create a new workflow
   guideline  - Create a new guideline
+  [custom]   - Create new type (folder) with confirmation
+
+Names can include subfolders:
+  frontend/typescript   - Creates in a subfolder
 
 Examples:
-  agmd new rule typescript       # Create a TypeScript rule
-  agmd new workflow release      # Create a release workflow
-  agmd new guideline code-style  # Create a code style guideline`,
-	Args: cobra.ExactArgs(2),
+  agmd new rule:typescript            # Create a TypeScript rule
+  agmd new rule:frontend/typescript   # Create in frontend/ subfolder
+  agmd new workflow:release           # Create a release workflow
+  agmd new guideline:code-style       # Create a code style guideline
+  agmd new instruction:never          # Creates new 'instruction' type (with prompt)`,
+	Args: cobra.ExactArgs(1),
 	RunE: runNew,
 }
 
@@ -37,17 +43,17 @@ func init() {
 }
 
 func runNew(cmd *cobra.Command, args []string) error {
-	itemType := strings.ToLower(args[0])
-	name := args[1]
+	// Parse type:name
+	parts := strings.SplitN(args[0], ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid format. Use 'type:name' (e.g., 'rule:typescript')")
+	}
+	itemType := strings.ToLower(parts[0])
+	name := parts[1]
 
 	green := color.New(color.FgGreen).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
-
-	// Validate type
-	if itemType != "rule" && itemType != "workflow" && itemType != "guideline" {
-		return fmt.Errorf("invalid type '%s'. Must be: rule, workflow, or guideline", itemType)
-	}
 
 	// Load registry
 	reg, err := registry.New()
@@ -59,39 +65,91 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
 
-	fmt.Printf("%s Creating new %s: %s\n", blue("→"), itemType, name)
-
-	// Check if already exists
+	// Check if type exists, if not, prompt to create it
 	paths := reg.Paths()
-	var existingPath string
+	var basePath string
+	isCustomType := false
+
 	switch itemType {
 	case "rule":
-		existingPath = filepath.Join(paths.Rules, name+".md")
+		basePath = paths.Rules
 	case "workflow":
-		existingPath = filepath.Join(paths.Workflows, name+".md")
+		basePath = paths.Workflows
 	case "guideline":
-		existingPath = filepath.Join(paths.Guidelines, name+".md")
+		basePath = paths.Guidelines
+	default:
+		// Custom type - check if folder exists
+		customPath := filepath.Join(reg.BasePath, itemType)
+		if _, err := os.Stat(customPath); os.IsNotExist(err) {
+			// Prompt to create new type
+			fmt.Printf("%s Type '%s' doesn't exist yet.\n", yellow("⚠"), itemType)
+			fmt.Printf("\nCreate new type '%s' in the registry? This will create a new folder:\n", itemType)
+			fmt.Printf("  %s\n\n", customPath)
+			fmt.Print("Create? (y/N): ")
+
+			var response string
+			fmt.Scanln(&response)
+			response = strings.ToLower(strings.TrimSpace(response))
+
+			if response != "y" && response != "yes" {
+				return fmt.Errorf("cancelled")
+			}
+
+			// Create the new type folder
+			if err := os.MkdirAll(customPath, 0755); err != nil {
+				return fmt.Errorf("failed to create type folder: %w", err)
+			}
+			fmt.Printf("%s Created new type: %s\n", green("✓"), itemType)
+		}
+		basePath = customPath
+		isCustomType = true
 	}
 
-	if _, err := os.Stat(existingPath); err == nil {
+	fmt.Printf("%s Creating new %s: %s\n", blue("→"), itemType, name)
+
+	// Handle subfolders in name (e.g., "frontend/typescript")
+	targetPath := filepath.Join(basePath, name+".md")
+	targetDir := filepath.Dir(targetPath)
+
+	// Create subdirectories if needed
+	if targetDir != basePath {
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			return fmt.Errorf("failed to create subdirectory: %w", err)
+		}
+		fmt.Printf("%s Created subdirectory: %s\n", green("✓"), filepath.Base(targetDir))
+	}
+
+	// Check if already exists
+	if _, err := os.Stat(targetPath); err == nil {
 		return fmt.Errorf("%s '%s' already exists in registry", itemType, name)
 	}
 
+	// Extract base name for template (without path)
+	baseName := filepath.Base(name)
+	if ext := filepath.Ext(baseName); ext == ".md" {
+		baseName = baseName[:len(baseName)-len(ext)]
+	}
+
 	// Create template content
-	template := generateTemplate(itemType, name)
+	var template string
+	if isCustomType {
+		template = generateGenericTemplate(itemType, baseName)
+	} else {
+		template = generateTemplate(itemType, baseName)
+	}
 
 	// Write to registry
-	if err := os.WriteFile(existingPath, []byte(template), 0644); err != nil {
+	if err := os.WriteFile(targetPath, []byte(template), 0644); err != nil {
 		return fmt.Errorf("failed to create %s: %w", itemType, err)
 	}
 
-	fmt.Printf("%s Created %s at: %s\n", green("✓"), itemType, existingPath)
+	fmt.Printf("%s Created %s at: %s\n", green("✓"), itemType, targetPath)
 
 	// Open in default editor
-	if err := openInEditor(existingPath); err != nil {
+	if err := openInEditor(targetPath); err != nil {
 		fmt.Printf("%s Could not open editor: %v\n", yellow("⚠"), err)
 		fmt.Println("\nNext steps:")
-		fmt.Printf("  1. Edit the file to add your content: %s\n", existingPath)
+		fmt.Printf("  1. Edit the file to add your content: %s\n", targetPath)
 		fmt.Printf("  2. Add to project: agmd add %s %s\n", itemType, name)
 	} else {
 		fmt.Println("\nNext step:")
@@ -99,6 +157,30 @@ func runNew(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func generateGenericTemplate(itemType, name string) string {
+	timestamp := time.Now().Format(time.RFC3339)
+	return fmt.Sprintf(`---
+name: %s
+description: Brief description of this %s
+created_at: %s
+---
+
+# %s: %s
+
+## Overview
+
+Describe the purpose and content of this %s.
+
+## Content
+
+Add your content here.
+
+## Notes
+
+Additional context or information.
+`, name, itemType, timestamp, strings.Title(itemType), strings.Title(strings.ReplaceAll(name, "-", " ")), itemType)
 }
 
 func generateTemplate(itemType, name string) string {

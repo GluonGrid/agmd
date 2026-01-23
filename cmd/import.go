@@ -3,11 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"agmd/pkg/generator"
 	"agmd/pkg/registry"
-	"agmd/pkg/state"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -19,20 +16,19 @@ var importCmd = &cobra.Command{
 	Use:   "import [file]",
 	Short: "Import existing config file and migrate to agmd format",
 	Long: `Import an existing AI agent configuration file (CLAUDE.md, .claude/claude.md, etc.)
-and migrate it to agmd format. The imported content is placed in the custom section
-for you to organize into agmd rules, workflows, and guidelines.
+and append it to directives.md for you to organize into rules, workflows, and guidelines.
 
 The import process:
 1. Creates backup of original file (in place, with .backup suffix)
-2. Creates agents.toml with default configuration
-3. Creates AGENTS.md with imported content in custom section
-4. Opens AGENTS.md in editor for you to organize content
-5. Validates for any unregistered rules after editing
+2. Initializes project if needed (creates agents.toml and directives.md)
+3. Appends imported content to directives.md with :::new markers
+4. Opens directives.md in editor for you to organize content
+5. You organize content using :::new markers to create new registry items
 
 Examples:
   agmd import CLAUDE.md              # Import from root
   agmd import .claude/claude.md      # Import from subdirectory
-  agmd import AGENTS.md --force      # Re-import non-agmd format AGENTS.md`,
+  agmd import existing.md --force    # Re-import with force`,
 	Args: cobra.ExactArgs(1),
 	RunE: runImport,
 }
@@ -52,18 +48,6 @@ func runImport(cmd *cobra.Command, args []string) error {
 	// Check if source file exists
 	if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
 		return fmt.Errorf("file %s not found", sourceFile)
-	}
-
-	// Check if agents.toml already exists
-	if _, err := os.Stat(agentsTomlFilename); err == nil && !importForce {
-		return fmt.Errorf("agents.toml already exists. Use --force to reimport")
-	}
-
-	// Check if AGENTS.md already exists (and it's not the source)
-	if sourceFile != agentsMdFilename {
-		if _, err := os.Stat(agentsMdFilename); err == nil && !importForce {
-			return fmt.Errorf("AGENTS.md already exists. Use --force to overwrite")
-		}
 	}
 
 	fmt.Printf("%s Importing %s...\n", blue("→"), sourceFile)
@@ -93,132 +77,85 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not initialized")
 	}
 
-	// Create agents.toml with default state
-	fmt.Printf("%s Creating agents.toml...\n", blue("→"))
-	st := state.DefaultState()
-	if err := st.Save(agentsTomlFilename); err != nil {
-		return fmt.Errorf("failed to create agents.toml: %w", err)
-	}
-	fmt.Printf("%s Created agents.toml\n", green("✓"))
-
-	// Create AGENTS.md with imported content in custom section
-	fmt.Printf("%s Creating AGENTS.md...\n", blue("→"))
-	gen := generator.New(reg, st)
-
-	// Generate base AGENTS.md (with no-modify-agmd-sections rule)
-	agentsMdContent, err := gen.Generate()
-	if err != nil {
-		return fmt.Errorf("failed to generate AGENTS.md template: %w", err)
+	// Initialize project if needed
+	projectInitialized := false
+	if _, err := os.Stat(directivesMdFilename); os.IsNotExist(err) {
+		fmt.Printf("%s Project not initialized. Initializing...\n", blue("→"))
+		if err := runInitCommand(); err != nil {
+			return fmt.Errorf("failed to initialize project: %w", err)
+		}
+		projectInitialized = true
+		fmt.Printf("%s Project initialized\n", green("✓"))
 	}
 
-	// Replace the default custom section content with imported content
+	// Append imported content to directives.md with :::new markers
+	fmt.Printf("%s Appending imported content to directives.md...\n", blue("→"))
+
 	importedContent := string(content)
+	importSection := fmt.Sprintf(`
 
-	customSectionWithImport := fmt.Sprintf(`<!-- agmd:custom-start -->
+---
 
-## Imported Content
+## Imported Content (Organize Below)
 
-Below is your imported configuration. You can:
-- Keep it here as custom content, OR
-- Organize it into the managed section above by moving content there
-- After organizing, run 'agmd validate' to detect unregistered rules
+Below is your imported configuration. Use :::new markers to create new rules/workflows:
+
+:::new rule:my-rule-name
+# Rule: My Rule Name
+Content here...
+:::
+
+:::new workflow:my-workflow
+# Workflow: My Workflow
+Steps here...
+:::
 
 ---
 
 %s
 
-<!-- agmd:custom-end -->`, importedContent)
+`, importedContent)
 
-	// Replace custom section
-	agentsMdContent = replaceCustomSection(agentsMdContent, customSectionWithImport)
-
-	// Write AGENTS.md
-	if err := os.WriteFile(agentsMdFilename, []byte(agentsMdContent), 0644); err != nil {
-		return fmt.Errorf("failed to write AGENTS.md: %w", err)
+	// Read existing directives.md
+	existingDirectives, err := os.ReadFile(directivesMdFilename)
+	if err != nil {
+		return fmt.Errorf("failed to read directives.md: %w", err)
 	}
-	fmt.Printf("%s Created AGENTS.md with imported content\n", green("✓"))
 
-	// Remove original file if it's not AGENTS.md and not in root
-	if sourceFile != agentsMdFilename && sourceFile != filepath.Base(sourceFile) {
-		// It's in a subdirectory, offer to remove
-		fmt.Printf("%s Original file is in subdirectory: %s\n", blue("ℹ"), sourceFile)
-		fmt.Println("  The backup remains at:", backupPath)
-		fmt.Println("  You may want to remove the original if no longer needed")
+	// Append import section
+	newDirectives := string(existingDirectives) + importSection
+	if err := os.WriteFile(directivesMdFilename, []byte(newDirectives), 0644); err != nil {
+		return fmt.Errorf("failed to write directives.md: %w", err)
 	}
+	fmt.Printf("%s Imported content appended to directives.md\n", green("✓"))
 
 	fmt.Printf("\n%s Import complete!\n", green("✓"))
-	fmt.Println("\n" + blue("→") + " Opening AGENTS.md for you to organize content...")
+	fmt.Println("\n" + blue("→") + " Opening directives.md for you to organize content...")
 	fmt.Println()
 	fmt.Println("Tips:")
-	fmt.Println("  • Imported content is in the custom section")
-	fmt.Println("  • Move rules/workflows to managed section if desired")
-	fmt.Println("  • After editing, validation will run automatically")
+	fmt.Println("  • Imported content is at the bottom of directives.md")
+	fmt.Println("  • Wrap sections with :::new markers to create new registry items:")
+	fmt.Println("    :::new rule:typescript")
+	fmt.Println("    # Rule: TypeScript Standards")
+	fmt.Println("    Your content here...")
+	fmt.Println("    :::")
+	fmt.Println("  • Use @rule:name or @workflow:name to reference existing items")
+	if !projectInitialized {
+		fmt.Println("  • Run 'agmd generate' after organizing to update AGENTS.md")
+	}
 	fmt.Println()
 
 	// Open in editor
-	if err := openInEditor(agentsMdFilename); err != nil {
+	if err := openInEditor(directivesMdFilename); err != nil {
 		fmt.Printf("%s Could not open editor: %v\n", yellow("⚠"), err)
-		fmt.Println("\nManually edit AGENTS.md to organize your content.")
-	}
-
-	// Auto-validate after editing
-	fmt.Printf("\n%s Running validation...\n", blue("→"))
-	if err := runValidateCommand(); err != nil {
-		fmt.Printf("%s Validation completed with suggestions\n", yellow("ℹ"))
-	} else {
-		fmt.Printf("%s No unregistered content detected\n", green("✓"))
+		fmt.Println("\nManually edit directives.md to organize your content.")
 	}
 
 	return nil
 }
 
-// replaceCustomSection replaces the custom section in the template
-func replaceCustomSection(content, newCustomSection string) string {
-	// Find and replace the default custom section
-	startMarker := "<!-- agmd:custom-start -->"
-	endMarker := "<!-- agmd:custom-end -->"
-
-	startIdx := findLastIndex(content, startMarker)
-	if startIdx == -1 {
-		return content
-	}
-
-	endIdx := findIndex(content[startIdx:], endMarker)
-	if endIdx == -1 {
-		return content
-	}
-
-	endIdx += startIdx + len(endMarker)
-
-	return content[:startIdx] + newCustomSection + content[endIdx:]
-}
-
-func findLastIndex(s, substr string) int {
-	lastIdx := -1
-	idx := 0
-	for {
-		i := findIndex(s[idx:], substr)
-		if i == -1 {
-			break
-		}
-		lastIdx = idx + i
-		idx = lastIdx + 1
-	}
-	return lastIdx
-}
-
-func findIndex(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-// runValidateCommand is a helper to run validation
-func runValidateCommand() error {
-	// Will be implemented with validate command
-	// For now, just return nil
-	return nil
+// runInitCommand is a helper to run project initialization
+func runInitCommand() error {
+	// Call the init command logic
+	return runInit(nil, nil)
 }

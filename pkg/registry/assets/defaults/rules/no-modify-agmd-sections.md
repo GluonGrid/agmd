@@ -52,30 +52,30 @@ This section is preserved when agmd regenerates AGENTS.md.
 ## Why This Matters
 
 **Managed sections are auto-generated** by the `agmd` CLI tool from:
-- Rules in `~/.agmd/rules/`
-- Workflows in `~/.agmd/workflows/`
-- Guidelines in `~/.agmd/guidelines/`
-- Active items listed in `agents.toml`
+- The source file `directives.md` in the project
+- Rules, workflows, and guidelines from the registry (`~/.agmd/`)
+- Active items expanded via `@rule:name` or `:::new` markers
 
 Any manual changes to managed sections will be **overwritten** when:
-- `agmd generate` is run
-- `agmd add rule/workflow` is run (if auto-regenerate is enabled)
+- `agmd generate` is run to regenerate AGENTS.md from directives.md
 - Rules/workflows are updated in the registry
 
 ## How to Make Changes
 
 ### To Modify Rules/Workflows/Guidelines
 
-Use the agmd CLI instead of editing AGENTS.md directly:
+Edit `directives.md` instead of editing AGENTS.md directly:
 
 ```bash
-# Create a new rule
-agmd new rule my-rule "Rule content"
+# Edit directives.md to add @rule:name references or :::new markers
+# Then regenerate AGENTS.md
+agmd generate
 
-# Add it to the project
+# Or create a new custom rule in the registry
+agmd new rule my-rule
+
+# Then add it to directives.md
 agmd add rule my-rule
-
-# This automatically regenerates AGENTS.md
 ```
 
 ### To Add Project-Specific Content

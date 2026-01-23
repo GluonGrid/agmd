@@ -19,6 +19,11 @@ func New() (*Registry, error) {
 	}, nil
 }
 
+// GetBasePath returns the base path of the registry
+func (r *Registry) GetBasePath() string {
+	return r.BasePath
+}
+
 // Paths returns all registry subdirectory paths
 func (r *Registry) Paths() RegistryPaths {
 	return RegistryPaths{

@@ -10,9 +10,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// loadRules loads all rules from a directory
+// loadRules loads all rules from a directory (recursively scans subdirectories)
 func (r *Registry) loadRules(dir string) ([]Rule, error) {
-	entries, err := os.ReadDir(dir)
+	return r.loadRulesRecursive(dir, dir)
+}
+
+// loadRulesRecursive recursively loads rules from a directory and subdirectories
+func (r *Registry) loadRulesRecursive(baseDir, currentDir string) ([]Rule, error) {
+	entries, err := os.ReadDir(currentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []Rule{}, nil
@@ -22,12 +27,23 @@ func (r *Registry) loadRules(dir string) ([]Rule, error) {
 
 	var rules []Rule
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		path := filepath.Join(currentDir, entry.Name())
+
+		if entry.IsDir() {
+			// Recursively scan subdirectories
+			subRules, err := r.loadRulesRecursive(baseDir, path)
+			if err != nil {
+				continue
+			}
+			rules = append(rules, subRules...)
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		rule, err := loadRule(path)
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		rule, err := loadRuleWithBase(path, baseDir)
 		if err != nil {
 			// Skip invalid files
 			continue
@@ -40,14 +56,26 @@ func (r *Registry) loadRules(dir string) ([]Rule, error) {
 
 // loadRule loads a single rule from a file
 func loadRule(path string) (*Rule, error) {
+	return loadRuleWithBase(path, filepath.Dir(path))
+}
+
+// loadRuleWithBase loads a rule and calculates name relative to baseDir
+func loadRuleWithBase(path string, baseDir string) (*Rule, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
+	// Calculate relative path from baseDir for the name (e.g., "auth/custom-auth")
+	relPath, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		relPath = filepath.Base(path)
+	}
+	name := strings.TrimSuffix(relPath, ".md")
+
 	rule := &Rule{
 		FilePath: path,
-		Name:     strings.TrimSuffix(filepath.Base(path), ".md"),
+		Name:     name,
 	}
 
 	frontmatter, markdown, err := extractFrontmatter(content)
@@ -59,15 +87,22 @@ func loadRule(path string) (*Rule, error) {
 		if err := yaml.Unmarshal(frontmatter, rule); err != nil {
 			return nil, fmt.Errorf("invalid frontmatter: %w", err)
 		}
+		// Restore the calculated name (don't let frontmatter override it)
+		rule.Name = name
 	}
 
 	rule.Content = string(markdown)
 	return rule, nil
 }
 
-// loadWorkflows loads all workflows from a directory
+// loadWorkflows loads all workflows from a directory (recursively scans subdirectories)
 func (r *Registry) loadWorkflows(dir string) ([]Workflow, error) {
-	entries, err := os.ReadDir(dir)
+	return r.loadWorkflowsRecursive(dir, dir)
+}
+
+// loadWorkflowsRecursive recursively loads workflows from a directory and subdirectories
+func (r *Registry) loadWorkflowsRecursive(baseDir, currentDir string) ([]Workflow, error) {
+	entries, err := os.ReadDir(currentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []Workflow{}, nil
@@ -77,12 +112,22 @@ func (r *Registry) loadWorkflows(dir string) ([]Workflow, error) {
 
 	var workflows []Workflow
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		path := filepath.Join(currentDir, entry.Name())
+
+		if entry.IsDir() {
+			subWorkflows, err := r.loadWorkflowsRecursive(baseDir, path)
+			if err != nil {
+				continue
+			}
+			workflows = append(workflows, subWorkflows...)
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		workflow, err := loadWorkflow(path)
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		workflow, err := loadWorkflowWithBase(path, baseDir)
 		if err != nil {
 			continue
 		}
@@ -94,14 +139,25 @@ func (r *Registry) loadWorkflows(dir string) ([]Workflow, error) {
 
 // loadWorkflow loads a single workflow from a file
 func loadWorkflow(path string) (*Workflow, error) {
+	return loadWorkflowWithBase(path, filepath.Dir(path))
+}
+
+// loadWorkflowWithBase loads a workflow and calculates name relative to baseDir
+func loadWorkflowWithBase(path string, baseDir string) (*Workflow, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
+	relPath, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		relPath = filepath.Base(path)
+	}
+	name := strings.TrimSuffix(relPath, ".md")
+
 	workflow := &Workflow{
 		FilePath: path,
-		Name:     strings.TrimSuffix(filepath.Base(path), ".md"),
+		Name:     name,
 	}
 
 	frontmatter, markdown, err := extractFrontmatter(content)
@@ -113,15 +169,22 @@ func loadWorkflow(path string) (*Workflow, error) {
 		if err := yaml.Unmarshal(frontmatter, workflow); err != nil {
 			return nil, fmt.Errorf("invalid frontmatter: %w", err)
 		}
+		// Restore the calculated name (don't let frontmatter override it)
+		workflow.Name = name
 	}
 
 	workflow.Content = string(markdown)
 	return workflow, nil
 }
 
-// loadGuidelines loads all guidelines from a directory
+// loadGuidelines loads all guidelines from a directory (recursively scans subdirectories)
 func (r *Registry) loadGuidelines(dir string) ([]Guideline, error) {
-	entries, err := os.ReadDir(dir)
+	return r.loadGuidelinesRecursive(dir, dir)
+}
+
+// loadGuidelinesRecursive recursively loads guidelines from a directory and subdirectories
+func (r *Registry) loadGuidelinesRecursive(baseDir, currentDir string) ([]Guideline, error) {
+	entries, err := os.ReadDir(currentDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []Guideline{}, nil
@@ -131,12 +194,22 @@ func (r *Registry) loadGuidelines(dir string) ([]Guideline, error) {
 
 	var guidelines []Guideline
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		path := filepath.Join(currentDir, entry.Name())
+
+		if entry.IsDir() {
+			subGuidelines, err := r.loadGuidelinesRecursive(baseDir, path)
+			if err != nil {
+				continue
+			}
+			guidelines = append(guidelines, subGuidelines...)
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		guideline, err := loadGuideline(path)
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		guideline, err := loadGuidelineWithBase(path, baseDir)
 		if err != nil {
 			continue
 		}
@@ -148,14 +221,25 @@ func (r *Registry) loadGuidelines(dir string) ([]Guideline, error) {
 
 // loadGuideline loads a single guideline from a file
 func loadGuideline(path string) (*Guideline, error) {
+	return loadGuidelineWithBase(path, filepath.Dir(path))
+}
+
+// loadGuidelineWithBase loads a guideline and calculates name relative to baseDir
+func loadGuidelineWithBase(path string, baseDir string) (*Guideline, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
+	relPath, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		relPath = filepath.Base(path)
+	}
+	name := strings.TrimSuffix(relPath, ".md")
+
 	guideline := &Guideline{
 		FilePath: path,
-		Name:     strings.TrimSuffix(filepath.Base(path), ".md"),
+		Name:     name,
 	}
 
 	frontmatter, markdown, err := extractFrontmatter(content)
@@ -167,6 +251,8 @@ func loadGuideline(path string) (*Guideline, error) {
 		if err := yaml.Unmarshal(frontmatter, guideline); err != nil {
 			return nil, fmt.Errorf("invalid frontmatter: %w", err)
 		}
+		// Restore the calculated name (don't let frontmatter override it)
+		guideline.Name = name
 	}
 
 	guideline.Content = string(markdown)
