@@ -131,6 +131,28 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	// List profiles
+	profiles, err := reg.ListProfiles()
+	if err != nil {
+		return fmt.Errorf("failed to list profiles: %w", err)
+	}
+
+	fmt.Printf("%s Profiles (%d):\n", cyan("●"), len(profiles))
+	if len(profiles) == 0 {
+		fmt.Printf("  %s No profiles found\n", yellow("ℹ"))
+		fmt.Printf("  %s Create one with: agmd new profile:NAME\n", blue("ℹ"))
+	} else {
+		for _, profile := range profiles {
+			fmt.Printf("    %s", profile.Name)
+			if profile.Description != "" {
+				fmt.Printf(" - %s", profile.Description)
+			}
+			fmt.Println()
+		}
+		fmt.Printf("\n  %s Use with: agmd init profile:NAME\n", blue("ℹ"))
+	}
+	fmt.Println()
+
 	if hasProject {
 		fmt.Printf("%s Active in current project: %d rules, %d workflows, %d guidelines\n",
 			blue("ℹ"), len(activeRules), len(activeWorkflows), len(activeGuidelines))

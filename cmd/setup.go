@@ -75,9 +75,12 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  • %s (profile templates)\n", paths.Profiles)
 
 	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Run 'agmd init' in a project directory to create AGENTS.md")
+	fmt.Println("  1. Run 'agmd init' in a project directory to create directives.md")
 	fmt.Println("  2. Run 'agmd new rule <name>' to create custom rules")
 	fmt.Println("  3. Run 'agmd add rule <name>' to add rules to a project")
+	fmt.Printf("\n%s Default profile created:\n", blue("ℹ"))
+	fmt.Println("  • 'agmd init' will use the 'default' profile automatically")
+	fmt.Println("  • Customize: agmd edit profile:default")
 
 	return nil
 }

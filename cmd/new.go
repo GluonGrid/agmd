@@ -16,13 +16,14 @@ import (
 
 var newCmd = &cobra.Command{
 	Use:   "new [type:name]",
-	Short: "Create a new rule, workflow, or guideline in the registry",
-	Long: `Create a new rule, workflow, or guideline and save it to the ~/.agmd/ registry.
+	Short: "Create a new rule, workflow, guideline, or profile",
+	Long: `Create a new rule, workflow, guideline, or profile and save it to the ~/.agmd/ registry.
 
 Types:
   rule       - Create a new rule
   workflow   - Create a new workflow
   guideline  - Create a new guideline
+  profile    - Save current directives.md as a reusable profile
   [custom]   - Create new type (folder) with confirmation
 
 Names can include subfolders:
@@ -33,6 +34,7 @@ Examples:
   agmd new rule:frontend/typescript   # Create in frontend/ subfolder
   agmd new workflow:release           # Create a release workflow
   agmd new guideline:code-style       # Create a code style guideline
+  agmd new profile:svelte-kit         # Save current project as a profile
   agmd new instruction:never          # Creates new 'instruction' type (with prompt)`,
 	Args: cobra.ExactArgs(1),
 	RunE: runNew,
@@ -63,6 +65,11 @@ func runNew(cmd *cobra.Command, args []string) error {
 
 	if !reg.Exists() {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
+	}
+
+	// Handle profile creation
+	if itemType == "profile" {
+		return createProfile(name, reg)
 	}
 
 	// Check if type exists, if not, prompt to create it
@@ -358,4 +365,131 @@ func openInEditor(filePath string) error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// createProfile creates a new profile from the current directives.md
+func createProfile(name string, reg *registry.Registry) error {
+	green := color.New(color.FgGreen).SprintFunc()
+	blue := color.New(color.FgBlue).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+
+	// Check if directives.md exists in current directory
+	if _, err := os.Stat(directivesMdFilename); os.IsNotExist(err) {
+		return fmt.Errorf("no %s found in current directory\nCreate a project first with 'agmd init'", directivesMdFilename)
+	}
+
+	// Read current directives.md
+	content, err := os.ReadFile(directivesMdFilename)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", directivesMdFilename, err)
+	}
+
+	contentStr := string(content)
+
+	// Validate directives.md before creating profile
+	fmt.Printf("%s Validating directives.md...\n", blue("→"))
+
+	// Check for :::new blocks
+	newBlocks := detectNewBlocks(contentStr)
+	hasNewBlocks := len(newBlocks.Rules) > 0 || len(newBlocks.Workflows) > 0 || len(newBlocks.Guidelines) > 0
+
+	if hasNewBlocks {
+		fmt.Printf("\n%s Cannot create profile: directives.md contains unpromoted :::new blocks\n\n", red("✗"))
+
+		if len(newBlocks.Rules) > 0 {
+			fmt.Printf("%s Unpromoted Rules:\n", yellow("⚠"))
+			for _, name := range newBlocks.Rules {
+				fmt.Printf("  • %s\n", name)
+			}
+		}
+		if len(newBlocks.Workflows) > 0 {
+			fmt.Printf("%s Unpromoted Workflows:\n", yellow("⚠"))
+			for _, name := range newBlocks.Workflows {
+				fmt.Printf("  • %s\n", name)
+			}
+		}
+		if len(newBlocks.Guidelines) > 0 {
+			fmt.Printf("%s Unpromoted Guidelines:\n", yellow("⚠"))
+			for _, name := range newBlocks.Guidelines {
+				fmt.Printf("  • %s\n", name)
+			}
+		}
+
+		fmt.Printf("\n%s Please promote these blocks first:\n", blue("ℹ"))
+		fmt.Printf("  agmd promote --all\n")
+		fmt.Printf("  agmd promote rule:NAME\n")
+		return fmt.Errorf("unpromoted :::new blocks found")
+	}
+
+	// Extract all referenced items from directives.md
+	referencedRules := make(map[string]bool)
+	referencedWorkflows := make(map[string]bool)
+	referencedGuidelines := make(map[string]bool)
+	extractActiveItems(contentStr, referencedRules, referencedWorkflows, referencedGuidelines)
+
+	// Check if all referenced items exist in registry
+	var missingItems []string
+
+	for ruleName := range referencedRules {
+		if _, err := reg.GetRule(ruleName); err != nil {
+			missingItems = append(missingItems, fmt.Sprintf("rule:%s", ruleName))
+		}
+	}
+
+	for workflowName := range referencedWorkflows {
+		if _, err := reg.GetWorkflow(workflowName); err != nil {
+			missingItems = append(missingItems, fmt.Sprintf("workflow:%s", workflowName))
+		}
+	}
+
+	for guidelineName := range referencedGuidelines {
+		if _, err := reg.GetGuideline(guidelineName); err != nil {
+			missingItems = append(missingItems, fmt.Sprintf("guideline:%s", guidelineName))
+		}
+	}
+
+	if len(missingItems) > 0 {
+		fmt.Printf("\n%s Cannot create profile: directives.md references items not found in registry\n\n", red("✗"))
+		fmt.Printf("%s Missing items:\n", yellow("⚠"))
+		for _, item := range missingItems {
+			fmt.Printf("  • %s\n", item)
+		}
+		fmt.Printf("\n%s These items need to be created in the registry first:\n", blue("ℹ"))
+		fmt.Printf("  agmd new rule:NAME\n")
+		fmt.Printf("  agmd new workflow:NAME\n")
+		return fmt.Errorf("missing items in registry")
+	}
+
+	fmt.Printf("%s All referenced items exist in registry\n", green("✓"))
+
+	// Check if profile already exists
+	paths := reg.Paths()
+	profilePath := filepath.Join(paths.Profiles, name+".md")
+
+	if _, err := os.Stat(profilePath); err == nil {
+		return fmt.Errorf("profile '%s' already exists at %s\nUse a different name or delete the existing profile", name, profilePath)
+	}
+
+	fmt.Printf("%s Creating profile '%s' from current %s...\n", blue("→"), name, directivesMdFilename)
+
+	// Create profile with metadata
+	profile := registry.Profile{
+		Name:        name,
+		Description: "", // Empty, user can add via frontmatter if desired
+		Content:     string(content),
+	}
+
+	// Save profile
+	if err := reg.SaveProfile(profile); err != nil {
+		return fmt.Errorf("failed to save profile: %w", err)
+	}
+
+	fmt.Printf("%s Created profile '%s' at %s\n", green("✓"), name, profilePath)
+	fmt.Printf("\n%s Next steps:\n", blue("ℹ"))
+	fmt.Printf("  • Edit description: agmd edit profile:%s\n", name)
+	fmt.Printf("  • Use in new project: agmd init profile:%s\n", name)
+	fmt.Printf("  • View all profiles: agmd list\n")
+
+	return nil
 }

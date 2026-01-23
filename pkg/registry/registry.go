@@ -194,7 +194,7 @@ func (r *Registry) ListProfiles() ([]Profile, error) {
 // GetProfile retrieves a specific profile by name
 func (r *Registry) GetProfile(name string) (*Profile, error) {
 	paths := r.Paths()
-	path := filepath.Join(paths.Profiles, name+".yaml")
+	path := filepath.Join(paths.Profiles, name+".md")
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("profile '%s' not found", name)
@@ -206,7 +206,7 @@ func (r *Registry) GetProfile(name string) (*Profile, error) {
 // SaveProfile saves a profile to the registry
 func (r *Registry) SaveProfile(profile Profile) error {
 	paths := r.Paths()
-	path := filepath.Join(paths.Profiles, profile.Name+".yaml")
+	path := filepath.Join(paths.Profiles, profile.Name+".md")
 
 	return saveProfile(path, profile)
 }

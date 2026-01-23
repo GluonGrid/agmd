@@ -16,9 +16,9 @@ const (
 	agentsMdFilename     = "AGENTS.md"     // Generated output
 )
 
-var generateCmd = &cobra.Command{
-	Use:   "generate",
-	Short: "Generate AGENTS.md from directives.md",
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync and generate AGENTS.md from directives.md",
 	Long: `Read directives.md and generate expanded AGENTS.md for AI agents.
 
 The command:
@@ -34,15 +34,15 @@ Processes:
 All non-directive content is preserved.
 
 Examples:
-  agmd generate           # Generate AGENTS.md from directives.md`,
-	RunE: runGenerate,
+  agmd sync               # Generate AGENTS.md from directives.md`,
+	RunE: runSync,
 }
 
 func init() {
-	rootCmd.AddCommand(generateCmd)
+	rootCmd.AddCommand(syncCmd)
 }
 
-func runGenerate(cmd *cobra.Command, args []string) error {
+func runSync(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
 
@@ -63,6 +63,9 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	if !reg.Exists() {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
+
+	// Auto-sync filenames with frontmatter names
+	autoSyncRegistryFilenames(reg)
 
 	// Create generator
 	gen := generator.New(reg, nil)

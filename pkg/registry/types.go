@@ -30,14 +30,12 @@ type Guideline struct {
 	FilePath    string
 }
 
-// Profile represents a profile in the registry (YAML file)
+// Profile represents a directives.md template in the registry
 type Profile struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description,omitempty"`
-	Rules       []string `yaml:"rules,omitempty"`
-	Workflows   []string `yaml:"workflows,omitempty"`
-	Guidelines  []string `yaml:"guidelines,omitempty"`
-	FilePath    string
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	Content     string // Full directives.md template content
+	FilePath    string // Path to the .md file
 }
 
 // Registry manages the ~/.agmd/ directory structure

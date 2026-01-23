@@ -271,7 +271,7 @@ func (r *Registry) loadProfiles(dir string) ([]Profile, error) {
 
 	var profiles []Profile
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
 
@@ -286,34 +286,70 @@ func (r *Registry) loadProfiles(dir string) ([]Profile, error) {
 	return profiles, nil
 }
 
-// loadProfile loads a single profile from a YAML file
+// loadProfile loads a single profile from a markdown file
 func loadProfile(path string) (*Profile, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var profile Profile
-	if err := yaml.Unmarshal(content, &profile); err != nil {
-		return nil, fmt.Errorf("invalid profile YAML: %w", err)
+	profile := &Profile{
+		FilePath: path,
+		Name:     strings.TrimSuffix(filepath.Base(path), ".md"),
 	}
 
-	profile.FilePath = path
-	if profile.Name == "" {
-		profile.Name = strings.TrimSuffix(filepath.Base(path), ".yaml")
+	// Extract frontmatter if present
+	frontmatter, _, err := extractFrontmatter(content)
+	if err != nil {
+		return nil, err
 	}
 
-	return &profile, nil
+	if len(frontmatter) > 0 {
+		if err := yaml.Unmarshal(frontmatter, profile); err != nil {
+			return nil, fmt.Errorf("invalid frontmatter: %w", err)
+		}
+		// Restore the calculated name (don't let frontmatter override it)
+		profile.Name = strings.TrimSuffix(filepath.Base(path), ".md")
+	}
+
+	// Store the full content (with frontmatter)
+	profile.Content = string(content)
+
+	return profile, nil
 }
 
-// saveProfile saves a profile to a YAML file
+// saveProfile saves a profile to a markdown file
 func saveProfile(path string, profile Profile) error {
-	data, err := yaml.Marshal(profile)
+	// If Content already has frontmatter, use it as-is
+	// Otherwise, create frontmatter from profile metadata
+	if profile.Content != "" {
+		// Check if content already has frontmatter
+		if bytes.HasPrefix([]byte(profile.Content), []byte("---\n")) {
+			// Content already has frontmatter, save as-is
+			if err := os.WriteFile(path, []byte(profile.Content), 0644); err != nil {
+				return fmt.Errorf("failed to write profile file: %w", err)
+			}
+			return nil
+		}
+	}
+
+	// Create frontmatter from profile struct
+	type ProfileMeta struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description,omitempty"`
+	}
+
+	meta := ProfileMeta{
+		Name:        profile.Name,
+		Description: profile.Description,
+	}
+
+	fullContent, err := marshalWithFrontmatter(meta, profile.Content)
 	if err != nil {
 		return fmt.Errorf("failed to marshal profile: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, []byte(fullContent), 0644); err != nil {
 		return fmt.Errorf("failed to write profile file: %w", err)
 	}
 

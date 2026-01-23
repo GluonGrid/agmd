@@ -14,14 +14,18 @@ import (
 
 var editCmd = &cobra.Command{
 	Use:   "edit [type:name]",
-	Short: "Edit a rule, workflow, or guideline in the registry",
+	Short: "Edit any registry item in your default editor",
 	Long: `Open a registry item in your default editor (specified by $EDITOR environment variable).
 Falls back to vim if $EDITOR is not set.
+
+Supports any type (rule, workflow, guideline, profile, or custom types).
 
 Examples:
   agmd edit rule:typescript
   agmd edit workflow:release
   agmd edit guideline:code-style
+  agmd edit profile:default
+  agmd edit custom_type:my-item
   EDITOR=nano agmd edit rule:custom-auth`,
 	RunE: runEdit,
 }
@@ -47,11 +51,6 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	itemType := strings.ToLower(parts[0])
 	name := parts[1]
 
-	// Validate type
-	if itemType != "rule" && itemType != "workflow" && itemType != "guideline" {
-		return fmt.Errorf("invalid type '%s'. Must be 'rule', 'workflow', or 'guideline'", itemType)
-	}
-
 	// Load registry
 	reg, err := registry.New()
 	if err != nil {
@@ -61,6 +60,8 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	// Get registry paths
 	paths := reg.Paths()
 	var basePath string
+
+	// Handle known types first
 	switch itemType {
 	case "rule":
 		basePath = paths.Rules
@@ -68,6 +69,11 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		basePath = paths.Workflows
 	case "guideline":
 		basePath = paths.Guidelines
+	case "profile":
+		basePath = paths.Profiles
+	default:
+		// For custom types, use registry base path + type directory
+		basePath = fmt.Sprintf("%s/%ss", reg.BasePath, itemType)
 	}
 
 	filePath := fmt.Sprintf("%s/%s.md", basePath, name)

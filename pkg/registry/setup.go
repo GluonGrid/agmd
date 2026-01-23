@@ -28,7 +28,23 @@ func (r *Registry) Setup(force bool) error {
 		return fmt.Errorf("failed to copy default files: %w", err)
 	}
 
+	// Create default profile (used by agmd init)
+	if err := r.createDefaultProfile(); err != nil {
+		return fmt.Errorf("failed to create default profile: %w", err)
+	}
+
 	return nil
+}
+
+// createDefaultProfile creates the default.md profile
+func (r *Registry) createDefaultProfile() error {
+	profile := Profile{
+		Name:        "default",
+		Description: "Default directives.md template with basic structure",
+		Content:     GetDefaultProfileTemplate(),
+	}
+
+	return r.SaveProfile(profile)
 }
 
 // copyDefaults copies default files from embedded assets to registry
