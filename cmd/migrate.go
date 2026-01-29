@@ -10,35 +10,40 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var importForce bool
+var migrateForce bool
 
-var importCmd = &cobra.Command{
-	Use:   "import [file]",
-	Short: "Import existing config file and migrate to agmd format",
-	Long: `Import an existing AI agent configuration file (CLAUDE.md, .claude/claude.md, etc.)
-and append it to directives.md for you to organize into rules, workflows, and guidelines.
+var migrateCmd = &cobra.Command{
+	Use:   "migrate <file>",
+	Short: "Migrate a raw CLAUDE.md or AGENTS.md to agmd format",
+	Long: `Migrate an unstructured AI agent configuration file to the agmd format.
 
-The import process:
-1. Creates backup of original file (in place, with .backup suffix)
-2. Initializes project if needed (creates agents.toml and directives.md)
-3. Appends imported content to directives.md with :::new markers
+Use this for projects that don't use agmd yet - raw CLAUDE.md or AGENTS.md files
+with freeform content that needs to be organized into rules, workflows, and guidelines.
+
+The migration process:
+1. Creates backup of original file (with .backup suffix)
+2. Initializes project if needed (creates directives.md)
+3. Appends content to directives.md with :::new markers
 4. Opens directives.md in editor for you to organize content
-5. You organize content using :::new markers to create new registry items
+5. Use 'agmd promote' to save organized items to your registry
+
+For collecting rules from a project that already uses agmd (has directives.md),
+use 'agmd collect' instead.
 
 Examples:
-  agmd import CLAUDE.md              # Import from root
-  agmd import .claude/claude.md      # Import from subdirectory
-  agmd import existing.md --force    # Re-import with force`,
+  agmd migrate CLAUDE.md              # Migrate from CLAUDE.md
+  agmd migrate .claude/claude.md      # Migrate from subdirectory
+  agmd migrate existing.md --force    # Re-migrate with force`,
 	Args: cobra.ExactArgs(1),
-	RunE: runImport,
+	RunE: runMigrate,
 }
 
 func init() {
-	rootCmd.AddCommand(importCmd)
-	importCmd.Flags().BoolVarP(&importForce, "force", "f", false, "Allow import even if agents.toml exists")
+	rootCmd.AddCommand(migrateCmd)
+	migrateCmd.Flags().BoolVarP(&migrateForce, "force", "f", false, "Allow migration even if directives.md exists")
 }
 
-func runImport(cmd *cobra.Command, args []string) error {
+func runMigrate(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
@@ -50,7 +55,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("file %s not found", sourceFile)
 	}
 
-	fmt.Printf("%s Importing %s...\n", blue("→"), sourceFile)
+	fmt.Printf("%s Migrating %s...\n", blue("→"), sourceFile)
 
 	// Read source file
 	content, err := os.ReadFile(sourceFile)
@@ -88,33 +93,33 @@ func runImport(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Project initialized\n", green("✓"))
 	}
 
-	// Append imported content to directives.md with :::new markers
-	fmt.Printf("%s Appending imported content to directives.md...\n", blue("→"))
+	// Append migrated content to directives.md with :::new markers
+	fmt.Printf("%s Appending migrated content to directives.md...\n", blue("→"))
 
-	importedContent := string(content)
-	importSection := fmt.Sprintf(`
+	migratedContent := string(content)
+	migrateSection := fmt.Sprintf(`
 
 ---
 
-## Imported Content (Organize Below)
+## Migrated Content (Organize Below)
 
-Below is your imported configuration. Use :::new markers to create new rules/workflows:
+Below is your migrated configuration. Use :::new markers to create new rules/workflows:
 
 :::new rule:my-rule-name
 # Rule: My Rule Name
 Content here...
-:::
+:::end
 
 :::new workflow:my-workflow
 # Workflow: My Workflow
 Steps here...
-:::
+:::end
 
 ---
 
 %s
 
-`, importedContent)
+`, migratedContent)
 
 	// Read existing directives.md
 	existingDirectives, err := os.ReadFile(directivesMdFilename)
@@ -122,24 +127,24 @@ Steps here...
 		return fmt.Errorf("failed to read directives.md: %w", err)
 	}
 
-	// Append import section
-	newDirectives := string(existingDirectives) + importSection
+	// Append migrate section
+	newDirectives := string(existingDirectives) + migrateSection
 	if err := os.WriteFile(directivesMdFilename, []byte(newDirectives), 0644); err != nil {
 		return fmt.Errorf("failed to write directives.md: %w", err)
 	}
-	fmt.Printf("%s Imported content appended to directives.md\n", green("✓"))
+	fmt.Printf("%s Migrated content appended to directives.md\n", green("✓"))
 
-	fmt.Printf("\n%s Import complete!\n", green("✓"))
+	fmt.Printf("\n%s Migration complete!\n", green("✓"))
 	fmt.Println("\n" + blue("→") + " Opening directives.md for you to organize content...")
 	fmt.Println()
 	fmt.Println("Tips:")
-	fmt.Println("  • Imported content is at the bottom of directives.md")
+	fmt.Println("  • Migrated content is at the bottom of directives.md")
 	fmt.Println("  • Wrap sections with :::new markers to create new registry items:")
 	fmt.Println("    :::new rule:typescript")
 	fmt.Println("    # Rule: TypeScript Standards")
 	fmt.Println("    Your content here...")
-	fmt.Println("    :::")
-	fmt.Println("  • Use @rule:name or @workflow:name to reference existing items")
+	fmt.Println("    :::end")
+	fmt.Println("  • Run 'agmd promote' to save items to your registry")
 	if !projectInitialized {
 		fmt.Println("  • Run 'agmd sync' after organizing to update AGENTS.md")
 	}

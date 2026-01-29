@@ -11,49 +11,55 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var extractCmd = &cobra.Command{
-	Use:   "extract",
-	Short: "Extract rules/workflows/guidelines from AGENTS.md into local registry",
-	Long: `Extract parses AGENTS.md and directives.md to import items into your local registry.
+var collectCmd = &cobra.Command{
+	Use:   "collect",
+	Short: "Collect rules from an agmd-compatible project into your registry",
+	Long: `Collect rules, workflows, and guidelines from an agmd-compatible project into your personal registry.
 
-This is useful when:
-- You clone a project and want to use its rules locally
-- You accidentally deleted your registry and need to recover
-- You want to add someone else's rules to your personal collection
+This command is for projects that already use agmd (have directives.md with :::include directives).
+It parses directives.md to find referenced items and extracts their content from AGENTS.md.
 
-The command reads both directives.md (for structure) and AGENTS.md (for content)
-and imports the items into your ~/.agmd/ registry.
+Use this when:
+- You clone an agmd project and want its rules in your registry
+- You find a project with great rules you want to reuse
+- You want to build your registry from existing agmd projects
+
+For migrating a project that doesn't use agmd yet (raw CLAUDE.md/AGENTS.md),
+use 'agmd migrate' instead.
 
 Examples:
-  agmd extract              # Extract all items from current project
-  agmd extract --all        # Extract all without prompts (skip conflicts)
-  agmd extract --overwrite  # Overwrite existing items without asking
+  agmd collect                    # Collect from AGENTS.md (default)
+  agmd collect --file CLAUDE.md   # Collect from CLAUDE.md instead
+  agmd collect --all              # Collect all without prompts (skip conflicts)
+  agmd collect --overwrite        # Overwrite existing items without asking
 `,
-	RunE: runExtract,
+	RunE: runCollect,
 }
 
 var (
-	extractAll       bool
-	extractOverwrite bool
+	collectAll       bool
+	collectOverwrite bool
+	collectFile      string
 )
 
 func init() {
-	rootCmd.AddCommand(extractCmd)
-	extractCmd.Flags().BoolVar(&extractAll, "all", false, "Extract all items without prompting")
-	extractCmd.Flags().BoolVar(&extractOverwrite, "overwrite", false, "Overwrite existing items without asking")
+	rootCmd.AddCommand(collectCmd)
+	collectCmd.Flags().BoolVar(&collectAll, "all", false, "Collect all items without prompting")
+	collectCmd.Flags().BoolVar(&collectOverwrite, "overwrite", false, "Overwrite existing items without asking")
+	collectCmd.Flags().StringVarP(&collectFile, "file", "f", "AGENTS.md", "Source file to collect from (default: AGENTS.md)")
 }
 
-func runExtract(cmd *cobra.Command, args []string) error {
-	// Check if directives.md and AGENTS.md exist
+func runCollect(cmd *cobra.Command, args []string) error {
+	// Check if directives.md and agents file exist
 	directivesPath := "directives.md"
-	agentsPath := "AGENTS.md"
+	agentsPath := collectFile
 
 	if _, err := os.Stat(directivesPath); os.IsNotExist(err) {
 		return fmt.Errorf("directives.md not found in current directory")
 	}
 
 	if _, err := os.Stat(agentsPath); os.IsNotExist(err) {
-		return fmt.Errorf("AGENTS.md not found in current directory")
+		return fmt.Errorf("%s not found in current directory", agentsPath)
 	}
 
 	// Read files
@@ -64,11 +70,11 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	agentsContent, err := os.ReadFile(agentsPath)
 	if err != nil {
-		return fmt.Errorf("failed to read AGENTS.md: %w", err)
+		return fmt.Errorf("failed to read %s: %w", agentsPath, err)
 	}
 
 	// Parse and match items
-	fmt.Println("→ Analyzing directives.md and AGENTS.md...")
+	fmt.Printf("→ Analyzing directives.md and %s...\n", agentsPath)
 	items, warnings, err := importer.MatchDirectivesWithAgents(
 		string(directivesContent),
 		string(agentsContent),
@@ -90,7 +96,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	}
 
 	if totalItems == 0 {
-		fmt.Println("ℹ No items found to extract")
+		fmt.Println("ℹ No items found to collect")
 		return nil
 	}
 
@@ -113,9 +119,9 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s. Run 'agmd setup' first", reg.GetBasePath())
 	}
 
-	// Extract items
-	fmt.Println("\n→ Extracting to local registry...")
-	imported := 0
+	// Collect items
+	fmt.Println("\n→ Collecting to local registry...")
+	collected := 0
 	skipped := 0
 	overwritten := 0
 
@@ -129,7 +135,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			}
 
 			if exists {
-				if extractOverwrite {
+				if collectOverwrite {
 					// Overwrite without asking
 					if err := writeItemToRegistry(reg, item); err != nil {
 						fmt.Printf("✗ Failed to overwrite %s:%s: %v\n", itemType, item.Name, err)
@@ -137,7 +143,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 						overwritten++
 						fmt.Printf("✓ Overwritten %s:%s\n", itemType, item.Name)
 					}
-				} else if extractAll {
+				} else if collectAll {
 					// Skip without asking
 					skipped++
 					fmt.Printf("⊘ Skipped %s:%s (already exists)\n", itemType, item.Name)
@@ -159,20 +165,20 @@ func runExtract(cmd *cobra.Command, args []string) error {
 						newName := promptNewName(itemType, item.Name)
 						item.Name = newName
 						if err := writeItemToRegistry(reg, item); err != nil {
-							fmt.Printf("✗ Failed to extract %s:%s: %v\n", itemType, item.Name, err)
+							fmt.Printf("✗ Failed to collect %s:%s: %v\n", itemType, item.Name, err)
 						} else {
-							imported++
-							fmt.Printf("✓ Extracted %s:%s (renamed)\n", itemType, item.Name)
+							collected++
+							fmt.Printf("✓ Collected %s:%s (renamed)\n", itemType, item.Name)
 						}
 					}
 				}
 			} else {
-				// Item doesn't exist, extract it
+				// Item doesn't exist, collect it
 				if err := writeItemToRegistry(reg, item); err != nil {
-					fmt.Printf("✗ Failed to extract %s:%s: %v\n", itemType, item.Name, err)
+					fmt.Printf("✗ Failed to collect %s:%s: %v\n", itemType, item.Name, err)
 				} else {
-					imported++
-					fmt.Printf("✓ Extracted %s:%s\n", itemType, item.Name)
+					collected++
+					fmt.Printf("✓ Collected %s:%s\n", itemType, item.Name)
 				}
 			}
 		}
@@ -180,8 +186,8 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	// Summary
 	fmt.Println()
-	fmt.Printf("✓ Extraction complete!\n")
-	fmt.Printf("  • Extracted: %d\n", imported)
+	fmt.Printf("✓ Collection complete!\n")
+	fmt.Printf("  • Collected: %d\n", collected)
 	if overwritten > 0 {
 		fmt.Printf("  • Overwritten: %d\n", overwritten)
 	}
