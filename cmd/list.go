@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"agmd/pkg/registry"
@@ -12,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var listTree bool
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available registry items including custom types",
@@ -19,12 +23,14 @@ var listCmd = &cobra.Command{
 Shows which items are active in the current project (if directives.md exists).
 
 Examples:
-  agmd list           # List all available content`,
+  agmd list           # List all available content
+  agmd list --tree    # Show registry as ASCII tree`,
 	RunE: runList,
 }
 
 func init() {
 	rootCmd.AddCommand(listCmd)
+	listCmd.Flags().BoolVarP(&listTree, "tree", "t", false, "Display registry as ASCII tree")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -41,6 +47,11 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	if !reg.Exists() {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
+	}
+
+	// Tree view mode
+	if listTree {
+		return runListTree(reg)
 	}
 
 	// Load active items from directives.md if it exists
@@ -256,12 +267,15 @@ func extractActiveItems(content string, rules, workflows, guidelines map[string]
 	}
 }
 
-// listCustomTypes scans registry for custom type directories (excluding profiles and shared)
+// listCustomTypes scans registry for custom type directories (excluding standard types)
 func listCustomTypes(basePath string) (map[string][]string, error) {
 	result := make(map[string][]string)
 	excludedDirs := map[string]bool{
-		"profile": true, // profiles are special - not content types
-		"shared":  true, // shared is for common resources
+		"rule":      true, // standard type
+		"workflow":  true, // standard type
+		"guideline": true, // standard type
+		"profile":   true, // profiles are special - not content types
+		"shared":    true, // shared is for common resources
 	}
 
 	// Read registry directory
@@ -303,4 +317,105 @@ func listCustomTypes(basePath string) (map[string][]string, error) {
 	}
 
 	return result, nil
+}
+
+// runListTree displays registry as an ASCII tree
+func runListTree(reg *registry.Registry) error {
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+
+	fmt.Printf("%s\n", cyan(reg.BasePath))
+
+	// Build tree structure
+	tree := buildRegistryTree(reg.BasePath)
+
+	// Print tree
+	printTree(tree, "", true, dim)
+
+	return nil
+}
+
+// TreeNode represents a node in the file tree
+type TreeNode struct {
+	Name     string
+	IsDir    bool
+	Children []*TreeNode
+}
+
+// buildRegistryTree builds a tree structure from the registry directory
+func buildRegistryTree(basePath string) []*TreeNode {
+	var nodes []*TreeNode
+
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return nodes
+	}
+
+	// Sort entries: directories first, then files
+	sort.Slice(entries, func(i, j int) bool {
+		iDir := entries[i].IsDir()
+		jDir := entries[j].IsDir()
+		if iDir != jDir {
+			return iDir // directories first
+		}
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	for _, entry := range entries {
+		node := &TreeNode{
+			Name:  entry.Name(),
+			IsDir: entry.IsDir(),
+		}
+
+		if entry.IsDir() {
+			// Recursively build children
+			childPath := filepath.Join(basePath, entry.Name())
+			node.Children = buildRegistryTree(childPath)
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	return nodes
+}
+
+// printTree prints the tree with ASCII art
+func printTree(nodes []*TreeNode, prefix string, isRoot bool, dim func(a ...interface{}) string) {
+	for i, node := range nodes {
+		isLast := i == len(nodes)-1
+
+		// Print connector
+		var connector string
+		if isRoot {
+			if isLast {
+				connector = "└── "
+			} else {
+				connector = "├── "
+			}
+		} else {
+			if isLast {
+				connector = "└── "
+			} else {
+				connector = "├── "
+			}
+		}
+
+		// Print node
+		if node.IsDir {
+			fmt.Printf("%s%s%s/\n", dim(prefix), dim(connector), node.Name)
+		} else {
+			fmt.Printf("%s%s%s\n", dim(prefix), dim(connector), node.Name)
+		}
+
+		// Print children
+		if len(node.Children) > 0 {
+			var childPrefix string
+			if isLast {
+				childPrefix = prefix + "    "
+			} else {
+				childPrefix = prefix + "│   "
+			}
+			printTree(node.Children, childPrefix, false, dim)
+		}
+	}
 }

@@ -17,16 +17,15 @@ var syncCmd = &cobra.Command{
 	Long: `Read directives.md and generate expanded AGENTS.md for AI agents.
 
 The command:
-1. Reads directives.md (source file with directives)
-2. Expands all directives with content from registry
-3. Writes expanded output to AGENTS.md
-
-Processes:
-- :::include TYPE:NAME directives
-- :::list TYPE blocks
-- :::new TYPE:NAME blocks
+1. Checks for unpromoted :::new blocks (errors if found)
+2. Reads directives.md (source file with directives)
+3. Expands all :::include and :::list directives with content from registry
+4. Writes expanded output to AGENTS.md
 
 All non-directive content is preserved.
+
+Note: If you have :::new blocks, run 'agmd promote' first to add them to
+your registry with proper metadata (name, description).
 
 Examples:
   agmd sync               # Generate AGENTS.md from directives.md`,
@@ -59,6 +58,21 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
 
+	// Check for :::new blocks - they must be promoted first
+	directivesBytes, err := os.ReadFile(directivesMdFilename)
+	if err != nil {
+		return fmt.Errorf("failed to read directives.md: %w", err)
+	}
+	newBlocks := detectNewBlocks(string(directivesBytes))
+	totalNew := len(newBlocks.Rules) + len(newBlocks.Workflows) + len(newBlocks.Guidelines)
+	if totalNew > 0 {
+		yellow := color.New(color.FgYellow).SprintFunc()
+		fmt.Printf("%s Found %d :::new blocks that need to be promoted first\n", yellow("⚠"), totalNew)
+		fmt.Println("\nRun 'agmd promote' to add them to your registry with proper metadata.")
+		fmt.Println("This ensures each item has a name and description in the frontmatter.")
+		return fmt.Errorf("cannot sync with unpromoted :::new blocks")
+	}
+
 	// Auto-sync filenames with frontmatter names
 	autoSyncRegistryFilenames(reg)
 
@@ -82,3 +96,4 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+

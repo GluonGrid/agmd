@@ -18,10 +18,10 @@ var setupCmd = &cobra.Command{
 
 This command sets up:
 - ~/.agmd/shared/base.md (universal guidelines)
-- ~/.agmd/rules/ (rule templates)
-- ~/.agmd/workflows/ (workflow templates)
-- ~/.agmd/guidelines/ (guideline templates)
-- ~/.agmd/profiles/ (profile templates)
+- ~/.agmd/rule/ (rule templates)
+- ~/.agmd/workflow/ (workflow templates)
+- ~/.agmd/guideline/ (guideline templates)
+- ~/.agmd/profile/ (profile templates)
 
 Examples:
   agmd setup              # Initialize registry

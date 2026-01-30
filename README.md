@@ -1,8 +1,16 @@
+<div align="center">
+
 # agmd
 
 **Stop copy-pasting AI instructions between projects.**
 
-agmd lets you maintain a personal registry of coding rules, workflows, and guidelines that you can mix and match across any project. Write your standards once, use them everywhere.
+Maintain a personal registry of rules, workflows, and guidelines that you can mix and match across any project. Write your standards once, use them everywhere.
+
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue.svg)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://img.shields.io/github/v/release/GluonGrid/agmd.svg)](https://github.com/GluonGrid/agmd/releases)
+
+</div>
 
 ## The Problem
 
@@ -83,11 +91,14 @@ agmd creates `~/.agmd/` to store your reusable content:
 
 ```
 ~/.agmd/
-├── rules/           # Coding rules (typescript.md, no-console.md, ...)
-├── workflows/       # Process workflows (commit.md, deploy.md, ...)
-├── guidelines/      # Best practices (code-style.md, testing.md, ...)
-└── profiles/        # Project templates (svelte-kit.md, fastapi.md, ...)
+├── rule/            # Coding rules (typescript.md, no-console.md, ...)
+├── workflow/        # Process workflows (commit.md, deploy.md, ...)
+├── guideline/       # Best practices (code-style.md, testing.md, ...)
+├── profile/         # Project templates (svelte-kit.md, fastapi.md, ...)
+└── <custom>/        # Your own categories (prompts/, templates/, ...)
 ```
+
+You can create any folder structure that makes sense for your workflow.
 
 ### 2. Simple Directive Syntax
 
@@ -116,6 +127,9 @@ Your custom content here
 agmd sync  # Expands directives.md → AGENTS.md
 ```
 
+- `:::include` and `:::list` directives expand to full content from registry
+- `:::new` blocks must be promoted first with `agmd promote`
+
 Update a rule in your registry, run `agmd sync` in each project, done.
 
 ## Commands
@@ -129,7 +143,7 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd remove type:name` | Remove an item from `directives.md` |
 | `agmd new type:name` | Create a new item in the registry |
 | `agmd list` | List all registry items (shows active items) |
-| `agmd promote` | Promote `:::new` blocks to the registry |
+| `agmd promote` | Promote `:::new` blocks to registry (required before sync) |
 | `agmd migrate <file>` | Migrate a raw CLAUDE.md/AGENTS.md to agmd format |
 | `agmd collect [-f file]` | Collect rules from an agmd project into your registry |
 
@@ -139,37 +153,53 @@ Two commands help you work with existing projects:
 
 | Command | Use when... | Result |
 |---------|-------------|--------|
-| `migrate` | Project has raw/unstructured CLAUDE.md (not using agmd) | Content → `directives.md` (for organizing) |
+| `migrate` | Project has raw/unstructured AI instructions (not using agmd) | Content → `directives.md` (for organizing) |
 | `collect` | Project already uses agmd (has `directives.md`) | Rules → `~/.agmd/` (for reuse) |
 
 ### Migrate: For Raw/Unstructured Files
 
-Use `migrate` when a project has a freeform CLAUDE.md or AGENTS.md that doesn't use agmd yet:
+Use `migrate` when a project has a freeform AI instruction file that doesn't use agmd yet:
 
 ```bash
-agmd migrate CLAUDE.md
+agmd migrate CLAUDE.md              # Opens editor to organize manually
+agmd migrate CLAUDE.md -i           # Interactive walkthrough (recommended)
 ```
 
-This creates a backup, appends content to `directives.md` with `:::new` markers, and opens your editor. Wrap sections with `:::new rule:name` / `:::end`, then run `agmd promote` to save them to your registry.
+**Interactive mode (`-i`) walks through each section:**
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+● Section 1/5: "TypeScript Standards"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Preview:
+  | Use strict mode for all TypeScript files.
+  | Avoid using `any` type - use `unknown` instead.
+  | Always define return types for functions.
+  | ... (12 more lines)
+
+[r] rule  [w] workflow  [g] guideline  [s] skip  [e] edit  [q] quit
+Type (default: rule): r
+Name (default: typescript-standards): typescript
+
+→ Marked as: :::new rule:typescript
+```
+
+- **[e] edit** - Opens the section in your editor to adjust content/boundaries
+- **[s] skip** - Keeps content as raw text (not wrapped)
+- **[q] quit** - Save progress and exit
+
+Then run `agmd promote` to save them to your registry, followed by `agmd sync` to generate AGENTS.md.
 
 ### Collect: For agmd-Compatible Projects
 
 Use `collect` when a project already uses agmd (has `directives.md` with `:::include` directives):
 
 ```bash
-agmd collect                    # Collect rules referenced in directives.md
-agmd collect --file CLAUDE.md   # Use CLAUDE.md instead of AGENTS.md
+agmd collect                    # Collect from AGENTS.md (default)
+agmd collect -f CLAUDE.md       # Collect from CLAUDE.md instead
 ```
 
-This parses `directives.md` to find referenced rules and saves them to `~/.agmd/` so you can reuse them in other projects.
-
-### Quick Start (No Organizing)
-
-```bash
-cp CLAUDE.md directives.md      # Use existing file as-is
-agmd add rule:typescript        # Start adding registry items
-agmd sync                       # Generate new AGENTS.md
-```
+This parses `directives.md` to find referenced items and extracts their expanded content from the output file, saving them to `~/.agmd/` for reuse in other projects.
 
 ## Profiles
 
@@ -200,25 +230,27 @@ Use `agmd symlink` to create the appropriate files for your toolchain.
 ## Example Workflow
 
 ```bash
-# You have 5 TypeScript projects with similar rules
-
-# 1. Create your master rule
+# 1. Create your master TypeScript rule once
 agmd new rule:typescript
 # (Opens editor - add your TypeScript standards)
 
-# 2. In each project
-cd ~/projects/app-1
+# 2. Use it in project A
+cd ~/projects/frontend-app
 agmd init
 agmd add rule:typescript
 agmd sync
+# → AGENTS.md now has your TypeScript standards
 
-# 3. Later, update the rule
+# 3. Use the same rule in project B
+cd ~/projects/api-server
+agmd init
+agmd add rule:typescript
+agmd sync
+# → Same standards, zero copy-paste
+
+# 4. Update the rule, sync wherever needed
 agmd edit rule:typescript
-
-# 4. Sync all projects
-for dir in ~/projects/app-*; do
-  (cd "$dir" && agmd sync)
-done
+cd ~/projects/frontend-app && agmd sync
 ```
 
 ## Registry Organization
@@ -267,8 +299,8 @@ agmd works out of the box with sensible defaults:
 ## Philosophy
 
 1. **DRY for AI instructions** - Write once, reference everywhere
-2. **Human-readable source** - `directives.md` is scannable at a glance
-3. **Machine-readable output** - `AGENTS.md` has full context for AI
+2. **Scannable source** - `directives.md` is short and readable at a glance
+3. **Complete output** - `AGENTS.md` has full expanded context for AI
 4. **Personal registry** - Your standards, your way
 5. **Simple syntax** - Learn 3 directives: `:::include`, `:::list`, `:::new`
 
