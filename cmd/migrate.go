@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,7 +31,7 @@ The migration process:
 2. Initializes project if needed (creates directives.md)
 3. Walks through each section interactively (with -i flag)
 4. Wraps content with :::new markers based on your choices
-5. Run 'agmd sync' to promote and generate AGENTS.md
+5. Run 'agmd promote' then 'agmd sync' to save to registry and generate AGENTS.md
 
 For collecting rules from a project that already uses agmd (has directives.md),
 use 'agmd collect' instead.
@@ -171,7 +170,8 @@ Steps here...
 	fmt.Println("Tips:")
 	fmt.Println("  • Migrated content is at the bottom of directives.md")
 	fmt.Println("  • Wrap sections with :::new markers to create new registry items")
-	fmt.Println("  • Run 'agmd sync' to promote items and generate AGENTS.md")
+	fmt.Println("  • Run 'agmd promote' to save items to registry")
+	fmt.Println("  • Run 'agmd sync' to generate AGENTS.md")
 	fmt.Println()
 	fmt.Println("Or use 'agmd migrate -i' for interactive walkthrough.")
 	fmt.Println()
@@ -185,13 +185,9 @@ Steps here...
 	return nil
 }
 
-// runInteractiveMigrate walks through sections interactively
+// runInteractiveMigrate walks through sections interactively using TUI
 func runInteractiveMigrate(content string) error {
-	green := color.New(color.FgGreen).SprintFunc()
-	blue := color.New(color.FgBlue).SprintFunc()
-	cyan := color.New(color.FgCyan).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
-	dim := color.New(color.Faint).SprintFunc()
 
 	// Detect sections
 	sections := detectMigrateSections(content)
@@ -201,102 +197,32 @@ func runInteractiveMigrate(content string) error {
 		return runSimpleMigrate(content)
 	}
 
-	fmt.Printf("\n%s Found %d sections. Let's walk through each one.\n\n", blue("→"), len(sections))
+	// Run TUI
+	processedSections, err := runMigrateTUI(sections)
+	if err != nil {
+		return fmt.Errorf("migrate TUI failed: %w", err)
+	}
 
-	reader := bufio.NewReader(os.Stdin)
-
-	// Stats
+	// Count stats
 	rules := 0
 	workflows := 0
 	guidelines := 0
 	skipped := 0
 
-	for i, section := range sections {
-		fmt.Println(cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
-		fmt.Printf("%s Section %d/%d: \"%s\"\n", cyan("●"), i+1, len(sections), section.Header)
-		fmt.Println(cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
-
-		// Show preview (first 5 lines)
-		previewLines := strings.Split(section.Content, "\n")
-		maxPreview := 5
-		if len(previewLines) < maxPreview {
-			maxPreview = len(previewLines)
-		}
-		fmt.Println(dim("Preview:"))
-		for j := 0; j < maxPreview; j++ {
-			line := previewLines[j]
-			if len(line) > 70 {
-				line = line[:67] + "..."
-			}
-			fmt.Printf("  %s %s\n", dim("|"), line)
-		}
-		if len(previewLines) > maxPreview {
-			fmt.Printf("  %s %s\n", dim("|"), dim(fmt.Sprintf("... (%d more lines)", len(previewLines)-maxPreview)))
-		}
-		fmt.Println()
-
-		// Prompt for type
-		fmt.Println("[r] rule  [w] workflow  [g] guideline  [s] skip  [e] edit  [q] quit")
-		fmt.Printf("Type %s: ", dim("(default: rule)"))
-
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(strings.ToLower(input))
-
-		switch input {
-		case "q", "quit":
-			fmt.Println("\nQuitting. Progress saved.")
-			return finishInteractiveMigrate(sections[:i], rules, workflows, guidelines, skipped)
-		case "s", "skip", "":
-			if input == "" {
-				// Default to rule, not skip
-				section.ItemType = "rule"
-				section.ItemName = promptForName(reader, section.Header, dim)
-				rules++
-				fmt.Printf("%s Marked as: :::new rule:%s\n\n", green("→"), section.ItemName)
-			} else {
-				section.ItemType = ""
-				skipped++
-				fmt.Printf("%s Skipped (will remain as raw text)\n\n", yellow("→"))
-			}
-		case "r", "rule":
-			section.ItemType = "rule"
-			section.ItemName = promptForName(reader, section.Header, dim)
+	for _, section := range processedSections {
+		switch section.ItemType {
+		case "rule":
 			rules++
-			fmt.Printf("%s Marked as: :::new rule:%s\n\n", green("→"), section.ItemName)
-		case "w", "workflow":
-			section.ItemType = "workflow"
-			section.ItemName = promptForName(reader, section.Header, dim)
+		case "workflow":
 			workflows++
-			fmt.Printf("%s Marked as: :::new workflow:%s\n\n", green("→"), section.ItemName)
-		case "g", "guideline":
-			section.ItemType = "guideline"
-			section.ItemName = promptForName(reader, section.Header, dim)
+		case "guideline":
 			guidelines++
-			fmt.Printf("%s Marked as: :::new guideline:%s\n\n", green("→"), section.ItemName)
-		case "e", "edit":
-			// Edit section content
-			editedContent, err := editSectionContent(section)
-			if err != nil {
-				fmt.Printf("%s Edit failed: %v\n", yellow("⚠"), err)
-			} else {
-				section.Content = editedContent
-				fmt.Printf("%s Content updated.\n", green("✓"))
-			}
-			// Re-prompt for type
-			i-- // Go back to this section
-			continue
-		default:
-			// Treat as rule by default
-			section.ItemType = "rule"
-			section.ItemName = promptForName(reader, section.Header, dim)
-			rules++
-			fmt.Printf("%s Marked as: :::new rule:%s\n\n", green("→"), section.ItemName)
+		case "":
+			skipped++
 		}
-
-		sections[i] = section
 	}
 
-	return finishInteractiveMigrate(sections, rules, workflows, guidelines, skipped)
+	return finishInteractiveMigrate(processedSections, rules, workflows, guidelines, skipped)
 }
 
 // finishInteractiveMigrate writes the organized content to directives.md
@@ -385,18 +311,6 @@ func detectMigrateSections(content string) []MigrateSection {
 	}
 
 	return sections
-}
-
-// promptForName asks user for the item name with a default
-func promptForName(reader *bufio.Reader, header string, dim func(a ...interface{}) string) string {
-	defaultName := slugify(header)
-	fmt.Printf("Name %s: ", dim(fmt.Sprintf("(default: %s)", defaultName)))
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return defaultName
-	}
-	return slugify(input)
 }
 
 // slugify converts a header to a valid item name
