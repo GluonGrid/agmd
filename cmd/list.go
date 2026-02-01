@@ -275,7 +275,6 @@ func listCustomTypes(basePath string) (map[string][]string, error) {
 		"workflow":  true, // standard type
 		"guideline": true, // standard type
 		"profile":   true, // profiles are special - not content types
-		"shared":    true, // shared is for common resources
 	}
 
 	// Read registry directory

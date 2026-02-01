@@ -28,7 +28,6 @@ func (r *Registry) GetBasePath() string {
 func (r *Registry) Paths() RegistryPaths {
 	return RegistryPaths{
 		Base:       r.BasePath,
-		Shared:     filepath.Join(r.BasePath, "shared"),
 		Rules:      filepath.Join(r.BasePath, "rule"),
 		Workflows:  filepath.Join(r.BasePath, "workflow"),
 		Guidelines: filepath.Join(r.BasePath, "guideline"),
@@ -52,7 +51,6 @@ func (r *Registry) Initialize() error {
 	// Create all directories
 	dirs := []string{
 		paths.Base,
-		paths.Shared,
 		paths.Rules,
 		paths.Workflows,
 		paths.Guidelines,

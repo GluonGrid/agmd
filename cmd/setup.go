@@ -17,11 +17,10 @@ var setupCmd = &cobra.Command{
 	Long: `Create the ~/.agmd directory structure and install default templates.
 
 This command sets up:
-- ~/.agmd/shared/base.md (universal guidelines)
-- ~/.agmd/rule/ (rule templates)
-- ~/.agmd/workflow/ (workflow templates)
-- ~/.agmd/guideline/ (guideline templates)
-- ~/.agmd/profile/ (profile templates)
+- ~/.agmd/rule/ (coding rules)
+- ~/.agmd/workflow/ (process workflows)
+- ~/.agmd/guideline/ (best practices)
+- ~/.agmd/profile/ (project templates)
 
 Examples:
   agmd setup              # Initialize registry
@@ -68,11 +67,10 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	paths := reg.Paths()
 	fmt.Println("\nCreated:")
-	fmt.Printf("  • %s (universal guidelines)\n", paths.Shared)
-	fmt.Printf("  • %s (rule templates)\n", paths.Rules)
-	fmt.Printf("  • %s (workflow templates)\n", paths.Workflows)
-	fmt.Printf("  • %s (guideline templates)\n", paths.Guidelines)
-	fmt.Printf("  • %s (profile templates)\n", paths.Profiles)
+	fmt.Printf("  • %s\n", paths.Rules)
+	fmt.Printf("  • %s\n", paths.Workflows)
+	fmt.Printf("  • %s\n", paths.Guidelines)
+	fmt.Printf("  • %s\n", paths.Profiles)
 
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Run 'agmd init' in a project directory to create directives.md")

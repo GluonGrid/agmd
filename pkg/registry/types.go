@@ -46,9 +46,8 @@ type Registry struct {
 // RegistryPaths contains all registry subdirectory paths
 type RegistryPaths struct {
 	Base       string // ~/.agmd
-	Shared     string // ~/.agmd/shared
-	Rules      string // ~/.agmd/rules
-	Workflows  string // ~/.agmd/workflows
-	Guidelines string // ~/.agmd/guidelines
-	Profiles   string // ~/.agmd/profiles
+	Rules      string // ~/.agmd/rule
+	Workflows  string // ~/.agmd/workflow
+	Guidelines string // ~/.agmd/guideline
+	Profiles   string // ~/.agmd/profile
 }
