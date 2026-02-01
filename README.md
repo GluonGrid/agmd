@@ -161,32 +161,28 @@ Two commands help you work with existing projects:
 Use `migrate` when a project has a freeform AI instruction file that doesn't use agmd yet:
 
 ```bash
-agmd migrate CLAUDE.md              # Opens editor to organize manually
-agmd migrate CLAUDE.md -i           # Interactive walkthrough (recommended)
+agmd migrate CLAUDE.md              # Creates directives.md and opens editor
+agmd migrate CLAUDE.md --force      # Overwrite existing directives.md
 ```
 
-**Interactive mode (`-i`) walks through each section:**
+The command:
+1. Creates a backup of your file (`CLAUDE.md.backup`)
+2. Copies content to `directives.md` with a guide header
+3. Opens your editor to organize with `:::new` markers
 
+Wrap sections you want to reuse:
+
+```markdown
+:::new rule:typescript
+# TypeScript Standards
+Use strict mode. Avoid `any` type.
+:::
+
+:::new workflow:deploy
+# Deploy Process
+Steps for deployment...
+:::
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-● Section 1/5: "TypeScript Standards"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Preview:
-  | Use strict mode for all TypeScript files.
-  | Avoid using `any` type - use `unknown` instead.
-  | Always define return types for functions.
-  | ... (12 more lines)
-
-[r] rule  [w] workflow  [g] guideline  [s] skip  [e] edit  [q] quit
-Type (default: rule): r
-Name (default: typescript-standards): typescript
-
-→ Marked as: :::new rule:typescript
-```
-
-- **[e] edit** - Opens the section in your editor to adjust content/boundaries
-- **[s] skip** - Keeps content as raw text (not wrapped)
-- **[q] quit** - Save progress and exit
 
 Then run `agmd promote` to save them to your registry, followed by `agmd sync` to generate AGENTS.md.
 
