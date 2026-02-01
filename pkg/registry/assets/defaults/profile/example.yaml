@@ -1,8 +1,0 @@
-name: example
-description: Example profile demonstrating the format
-rules:
-  - no-modify-agmd-sections
-workflows:
-  - example
-guidelines:
-  - example
