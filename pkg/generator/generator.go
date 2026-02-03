@@ -36,7 +36,7 @@ func (g *Generator) Generate() (string, error) {
 	if len(g.State.Rules) > 0 {
 		builder.WriteString("## Rules\n\n")
 		for _, ruleName := range g.State.Rules {
-			content, err := g.renderRule(ruleName)
+			content, err := g.renderItem("rule", ruleName)
 			if err != nil {
 				return "", fmt.Errorf("failed to render rule '%s': %w", ruleName, err)
 			}
@@ -49,7 +49,7 @@ func (g *Generator) Generate() (string, error) {
 	if len(g.State.Workflows) > 0 {
 		builder.WriteString("## Workflows\n\n")
 		for _, workflowName := range g.State.Workflows {
-			content, err := g.renderWorkflow(workflowName)
+			content, err := g.renderItem("workflow", workflowName)
 			if err != nil {
 				return "", fmt.Errorf("failed to render workflow '%s': %w", workflowName, err)
 			}
@@ -62,7 +62,7 @@ func (g *Generator) Generate() (string, error) {
 	if len(g.State.Guidelines) > 0 {
 		builder.WriteString("## Guidelines\n\n")
 		for _, guidelineName := range g.State.Guidelines {
-			content, err := g.renderGuideline(guidelineName)
+			content, err := g.renderItem("guideline", guidelineName)
 			if err != nil {
 				return "", fmt.Errorf("failed to render guideline '%s': %w", guidelineName, err)
 			}
@@ -74,36 +74,14 @@ func (g *Generator) Generate() (string, error) {
 	return builder.String(), nil
 }
 
-
-// renderRule renders a rule from the registry (strips frontmatter, keeps markdown)
-func (g *Generator) renderRule(name string) (string, error) {
-	rule, err := g.Registry.GetRule(name)
+// renderItem renders an item from the registry
+func (g *Generator) renderItem(itemType, name string) (string, error) {
+	item, err := g.Registry.GetItem(itemType, name)
 	if err != nil {
 		return "", err
 	}
 
-	// Return content without frontmatter (it was already stripped by loader)
-	return formatAsSubsection(rule.Name, rule.Content), nil
-}
-
-// renderWorkflow renders a workflow from the registry
-func (g *Generator) renderWorkflow(name string) (string, error) {
-	workflow, err := g.Registry.GetWorkflow(name)
-	if err != nil {
-		return "", err
-	}
-
-	return formatAsSubsection(workflow.Name, workflow.Content), nil
-}
-
-// renderGuideline renders a guideline from the registry
-func (g *Generator) renderGuideline(name string) (string, error) {
-	guideline, err := g.Registry.GetGuideline(name)
-	if err != nil {
-		return "", err
-	}
-
-	return formatAsSubsection(guideline.Name, guideline.Content), nil
+	return formatAsSubsection(item.Name, item.Content), nil
 }
 
 // formatAsSubsection wraps content as a ### subsection
@@ -116,19 +94,17 @@ func formatAsSubsection(name, content string) string {
 }
 
 // ParseAndExpand reads directives.md, strips frontmatter, expands directives from registry, and returns the result
-// This is the new directive-based generation method that replaces the TOML-based approach
 func (g *Generator) ParseAndExpand(inputPath string) (string, error) {
-	// Read the directives.md file
 	content, err := os.ReadFile(inputPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s: %w", inputPath, err)
 	}
 
-	// Strip frontmatter if present (directives.md may have YAML frontmatter)
+	// Strip frontmatter if present
 	content = stripFrontmatter(content)
 
 	// Use the parser to expand directives
-	expanded, err := parser.ParseAndExpand(content, g.Registry.GetBasePath())
+	expanded, err := parser.ParseAndExpand(content, g.Registry.BasePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse and expand directives: %w", err)
 	}
@@ -138,7 +114,6 @@ func (g *Generator) ParseAndExpand(inputPath string) (string, error) {
 
 // stripFrontmatter removes YAML frontmatter from content if present
 func stripFrontmatter(content []byte) []byte {
-	// Check if content starts with frontmatter delimiter
 	if len(content) < 4 || string(content[:4]) != "---\n" {
 		return content
 	}
@@ -147,7 +122,6 @@ func stripFrontmatter(content []byte) []byte {
 	end := -1
 	for i := 4; i < len(content)-3; i++ {
 		if content[i] == '\n' && i+4 < len(content) && string(content[i+1:i+4]) == "---" {
-			// Check if it's followed by newline or end of content
 			if i+4 == len(content) || content[i+4] == '\n' || content[i+4] == '\r' {
 				end = i + 4
 				break
@@ -156,11 +130,9 @@ func stripFrontmatter(content []byte) []byte {
 	}
 
 	if end == -1 {
-		// Unclosed frontmatter, return as-is
 		return content
 	}
 
-	// Skip past the closing delimiter and any following newlines
 	for end < len(content) && (content[end] == '\n' || content[end] == '\r') {
 		end++
 	}

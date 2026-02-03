@@ -86,23 +86,18 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 # Edit this file, then run: agmd promote && agmd sync
 ---
 
-# Directives
+# Agent Instructions
 
-<!--
-Wrap sections with :::new to create registry items:
+*Migrated with agmd - <https://github.com/GluonGrid/agmd>*
 
-:::new rule:my-rule
-Your rule content here...
-:::
+:::include guide:agmd
 
-:::new workflow:my-workflow
-Your workflow steps...
-:::
+---
 
-After editing, run:
-  agmd promote   (save to registry)
-  agmd sync      (generate AGENTS.md)
--->
+## Migrated Content
+
+Wrap sections below with ` + "`:::new type:name`" + ` and ` + "`:::end`" + ` to create reusable registry items.
+Then run ` + "`agmd promote`" + ` to save them to your registry.
 
 %s
 `, string(content))

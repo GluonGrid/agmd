@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // New creates a new Registry instance
@@ -19,20 +20,9 @@ func New() (*Registry, error) {
 	}, nil
 }
 
-// GetBasePath returns the base path of the registry
-func (r *Registry) GetBasePath() string {
-	return r.BasePath
-}
-
-// Paths returns all registry subdirectory paths
-func (r *Registry) Paths() RegistryPaths {
-	return RegistryPaths{
-		Base:       r.BasePath,
-		Rules:      filepath.Join(r.BasePath, "rule"),
-		Workflows:  filepath.Join(r.BasePath, "workflow"),
-		Guidelines: filepath.Join(r.BasePath, "guideline"),
-		Profiles:   filepath.Join(r.BasePath, "profile"),
-	}
+// TypePath returns the path for a given type
+func (r *Registry) TypePath(itemType string) string {
+	return filepath.Join(r.BasePath, itemType)
 }
 
 // Exists checks if the registry exists
@@ -44,155 +34,97 @@ func (r *Registry) Exists() bool {
 	return info.IsDir()
 }
 
-// Initialize creates the registry directory structure
-func (r *Registry) Initialize() error {
-	paths := r.Paths()
+// GetItem retrieves an item by type and name
+func (r *Registry) GetItem(itemType, name string) (*Item, error) {
+	path := filepath.Join(r.BasePath, itemType, name+".md")
 
-	// Create all directories
-	dirs := []string{
-		paths.Base,
-		paths.Rules,
-		paths.Workflows,
-		paths.Guidelines,
-		paths.Profiles,
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, fmt.Errorf("%s '%s' not found", itemType, name)
 	}
 
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	return loadItem(path, itemType)
+}
+
+// SaveItem saves an item to the registry
+func (r *Registry) SaveItem(item Item) error {
+	// Ensure type directory exists
+	typeDir := filepath.Join(r.BasePath, item.Type)
+	if err := os.MkdirAll(typeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	path := filepath.Join(typeDir, item.Name+".md")
+
+	content := fmt.Sprintf(`---
+name: %s
+description: %s
+---
+
+%s`, item.Name, item.Description, item.Content)
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}
+
+// ListTypes returns all type directories in the registry
+func (r *Registry) ListTypes() ([]string, error) {
+	entries, err := os.ReadDir(r.BasePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var types []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			types = append(types, entry.Name())
 		}
 	}
-
-	return nil
+	return types, nil
 }
 
-// ListRules returns all rules in the registry
-func (r *Registry) ListRules() ([]Rule, error) {
-	paths := r.Paths()
-	return r.loadRules(paths.Rules)
-}
+// ListItems returns all items of a given type
+func (r *Registry) ListItems(itemType string) ([]Item, error) {
+	typeDir := filepath.Join(r.BasePath, itemType)
 
-// GetRule retrieves a specific rule by name
-func (r *Registry) GetRule(name string) (*Rule, error) {
-	paths := r.Paths()
-	path := filepath.Join(paths.Rules, name+".md")
-
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("rule '%s' not found", name)
+	if _, err := os.Stat(typeDir); os.IsNotExist(err) {
+		return nil, nil // No items of this type
 	}
 
-	return loadRule(path)
+	return r.loadItems(typeDir, itemType)
 }
 
-// SaveRule saves a rule to the registry
-func (r *Registry) SaveRule(rule Rule) error {
-	paths := r.Paths()
-	path := filepath.Join(paths.Rules, rule.Name+".md")
-
-	content, err := marshalWithFrontmatter(rule, rule.Content)
+// loadItems loads all items from a directory
+func (r *Registry) loadItems(dir, itemType string) ([]Item, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("failed to marshal rule: %w", err)
+		return nil, err
 	}
 
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write rule file: %w", err)
+	var items []Item
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		item, err := loadItem(path, itemType)
+		if err != nil {
+			continue // Skip invalid files
+		}
+		items = append(items, *item)
 	}
 
-	return nil
+	return items, nil
 }
 
-// DeleteRule removes a rule from the registry
-func (r *Registry) DeleteRule(name string) error {
-	paths := r.Paths()
-	path := filepath.Join(paths.Rules, name+".md")
+// Profile functions (special case - templates for directives.md)
 
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("failed to delete rule: %w", err)
-	}
-
-	return nil
-}
-
-// ListWorkflows returns all workflows in the registry
-func (r *Registry) ListWorkflows() ([]Workflow, error) {
-	paths := r.Paths()
-	return r.loadWorkflows(paths.Workflows)
-}
-
-// GetWorkflow retrieves a specific workflow by name
-func (r *Registry) GetWorkflow(name string) (*Workflow, error) {
-	paths := r.Paths()
-	path := filepath.Join(paths.Workflows, name+".md")
-
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("workflow '%s' not found", name)
-	}
-
-	return loadWorkflow(path)
-}
-
-// SaveWorkflow saves a workflow to the registry
-func (r *Registry) SaveWorkflow(workflow Workflow) error {
-	paths := r.Paths()
-	path := filepath.Join(paths.Workflows, workflow.Name+".md")
-
-	content, err := marshalWithFrontmatter(workflow, workflow.Content)
-	if err != nil {
-		return fmt.Errorf("failed to marshal workflow: %w", err)
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write workflow file: %w", err)
-	}
-
-	return nil
-}
-
-// ListGuidelines returns all guidelines in the registry
-func (r *Registry) ListGuidelines() ([]Guideline, error) {
-	paths := r.Paths()
-	return r.loadGuidelines(paths.Guidelines)
-}
-
-// GetGuideline retrieves a specific guideline by name
-func (r *Registry) GetGuideline(name string) (*Guideline, error) {
-	paths := r.Paths()
-	path := filepath.Join(paths.Guidelines, name+".md")
-
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("guideline '%s' not found", name)
-	}
-
-	return loadGuideline(path)
-}
-
-// SaveGuideline saves a guideline to the registry
-func (r *Registry) SaveGuideline(guideline Guideline) error {
-	paths := r.Paths()
-	path := filepath.Join(paths.Guidelines, guideline.Name+".md")
-
-	content, err := marshalWithFrontmatter(guideline, guideline.Content)
-	if err != nil {
-		return fmt.Errorf("failed to marshal guideline: %w", err)
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write guideline file: %w", err)
-	}
-
-	return nil
-}
-
-// ListProfiles returns all profiles in the registry
-func (r *Registry) ListProfiles() ([]Profile, error) {
-	paths := r.Paths()
-	return r.loadProfiles(paths.Profiles)
-}
-
-// GetProfile retrieves a specific profile by name
+// GetProfile retrieves a profile by name
 func (r *Registry) GetProfile(name string) (*Profile, error) {
-	paths := r.Paths()
-	path := filepath.Join(paths.Profiles, name+".md")
+	path := filepath.Join(r.BasePath, "profile", name+".md")
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("profile '%s' not found", name)
@@ -203,8 +135,22 @@ func (r *Registry) GetProfile(name string) (*Profile, error) {
 
 // SaveProfile saves a profile to the registry
 func (r *Registry) SaveProfile(profile Profile) error {
-	paths := r.Paths()
-	path := filepath.Join(paths.Profiles, profile.Name+".md")
+	profileDir := filepath.Join(r.BasePath, "profile")
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return err
+	}
 
+	path := filepath.Join(profileDir, profile.Name+".md")
 	return saveProfile(path, profile)
+}
+
+// ListProfiles returns all profiles
+func (r *Registry) ListProfiles() ([]Profile, error) {
+	profileDir := filepath.Join(r.BasePath, "profile")
+
+	if _, err := os.Stat(profileDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	return r.loadProfiles(profileDir)
 }

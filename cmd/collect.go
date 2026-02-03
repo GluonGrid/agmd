@@ -116,7 +116,7 @@ func runCollect(cmd *cobra.Command, args []string) error {
 	}
 
 	if !reg.Exists() {
-		return fmt.Errorf("registry not found at %s. Run 'agmd setup' first", reg.GetBasePath())
+		return fmt.Errorf("registry not found at %s. Run 'agmd setup' first", reg.BasePath)
 	}
 
 	// Collect items
@@ -128,7 +128,7 @@ func runCollect(cmd *cobra.Command, args []string) error {
 	for itemType, itemList := range items {
 		for _, item := range itemList {
 			// Check if item already exists in registry
-			itemPath := filepath.Join(reg.Paths().Base, itemType, item.Name+".md")
+			itemPath := filepath.Join(reg.BasePath, itemType, item.Name+".md")
 			exists := false
 			if _, err := os.Stat(itemPath); err == nil {
 				exists = true
@@ -204,14 +204,14 @@ func writeItemToRegistry(reg *registry.Registry, item importer.ImportedItem) err
 	var targetDir string
 	switch item.Type {
 	case "rule":
-		targetDir = reg.Paths().Rules
+		targetDir = reg.TypePath("rule")
 	case "workflow":
-		targetDir = reg.Paths().Workflows
+		targetDir = reg.TypePath("workflow")
 	case "guideline":
-		targetDir = reg.Paths().Guidelines
+		targetDir = reg.TypePath("guideline")
 	default:
 		// Custom type - create directory if needed
-		targetDir = filepath.Join(reg.GetBasePath(), item.Type)
+		targetDir = filepath.Join(reg.BasePath, item.Type)
 		if err := os.MkdirAll(targetDir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory for type '%s': %w", item.Type, err)
 		}

@@ -64,10 +64,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read directives.md: %w", err)
 	}
 	newBlocks := detectNewBlocks(string(directivesBytes))
-	totalNew := len(newBlocks.Rules) + len(newBlocks.Workflows) + len(newBlocks.Guidelines)
-	if totalNew > 0 {
+	if len(newBlocks.Items) > 0 {
 		yellow := color.New(color.FgYellow).SprintFunc()
-		fmt.Printf("%s Found %d :::new blocks that need to be promoted first\n", yellow("⚠"), totalNew)
+		fmt.Printf("%s Found %d :::new blocks that need to be promoted first\n", yellow("⚠"), len(newBlocks.Items))
 		fmt.Println("\nRun 'agmd promote' to add them to your registry with proper metadata.")
 		fmt.Println("This ensures each item has a name and description in the frontmatter.")
 		return fmt.Errorf("cannot sync with unpromoted :::new blocks")

@@ -14,71 +14,55 @@ var setupForce bool
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Initialize the agmd registry",
-	Long: `Create the ~/.agmd directory structure and install default templates.
+	Long: `Create the ~/.agmd directory for storing reusable content.
 
-This command sets up:
-- ~/.agmd/rule/ (coding rules)
-- ~/.agmd/workflow/ (process workflows)
-- ~/.agmd/guideline/ (best practices)
-- ~/.agmd/profile/ (project templates)
+The registry starts empty. Create items with any type you want:
+  agmd new rule:my-rule
+  agmd new framework:my-framework
+  agmd new prompt:coding-assistant
 
 Examples:
   agmd setup              # Initialize registry
-  agmd setup --force      # Reinitialize (overwrites existing)`,
+  agmd setup --force      # Reinitialize`,
 	RunE: runSetup,
 }
 
 func init() {
 	rootCmd.AddCommand(setupCmd)
-	setupCmd.Flags().BoolVar(&setupForce, "force", false, "Force reinitialize (overwrites existing)")
+	setupCmd.Flags().BoolVar(&setupForce, "force", false, "Force reinitialize")
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
-	blue := color.New(color.FgBlue).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
+	blue := color.New(color.FgBlue).SprintFunc()
 
-	// Create registry
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to create registry: %w", err)
 	}
 
-	// Check if already exists
 	if reg.Exists() && !setupForce {
-		fmt.Printf("%s Registry already exists at: %s\n", yellow("ℹ"), reg.BasePath)
-		fmt.Println("\nUse --force to reinitialize (this will overwrite existing files)")
+		fmt.Printf("%s Registry already exists: %s\n", yellow("!"), reg.BasePath)
+		fmt.Println("\nUse --force to reinitialize")
 		return nil
 	}
 
 	if setupForce && reg.Exists() {
-		fmt.Printf("%s Reinitializing registry at: %s\n", yellow("⚠"), reg.BasePath)
+		fmt.Printf("%s Reinitializing: %s\n", yellow("!"), reg.BasePath)
 	} else {
-		fmt.Printf("%s Initializing registry at: %s\n", blue("→"), reg.BasePath)
+		fmt.Printf("%s Creating: %s\n", blue("->"), reg.BasePath)
 	}
 
-	// Setup registry
 	if err := reg.Setup(setupForce); err != nil {
 		return fmt.Errorf("setup failed: %w", err)
 	}
 
-	// Success message
-	fmt.Printf("\n%s Registry initialized successfully!\n", green("✓"))
-
-	paths := reg.Paths()
-	fmt.Println("\nCreated:")
-	fmt.Printf("  • %s\n", paths.Rules)
-	fmt.Printf("  • %s\n", paths.Workflows)
-	fmt.Printf("  • %s\n", paths.Guidelines)
-	fmt.Printf("  • %s\n", paths.Profiles)
-
+	fmt.Printf("\n%s Registry ready!\n", green("ok"))
 	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Run 'agmd init' in a project directory to create directives.md")
-	fmt.Println("  2. Run 'agmd new rule <name>' to create custom rules")
-	fmt.Println("  3. Run 'agmd add rule <name>' to add rules to a project")
-	fmt.Printf("\n%s Default profile created:\n", blue("ℹ"))
-	fmt.Println("  • 'agmd init' will use the 'default' profile automatically")
-	fmt.Println("  • Customize: agmd edit profile:default")
+	fmt.Println("  agmd init              # Create directives.md in a project")
+	fmt.Println("  agmd new type:name     # Create a reusable item")
+	fmt.Println("  agmd list              # See your registry")
 
 	return nil
 }

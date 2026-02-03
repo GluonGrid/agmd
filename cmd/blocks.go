@@ -2,24 +2,27 @@ package cmd
 
 import "regexp"
 
+// NewBlock represents a single :::new block with its type and name
+type NewBlock struct {
+	Type string
+	Name string
+}
+
 // NewBlocksContent represents detected :::new blocks in directives.md
 type NewBlocksContent struct {
-	Rules      []string
-	Workflows  []string
-	Guidelines []string
+	// Items contains all detected :::new blocks with their type and name
+	Items []NewBlock
 }
 
 // detectNewBlocks scans directives.md for :::new markers
 func detectNewBlocks(content string) NewBlocksContent {
 	result := NewBlocksContent{
-		Rules:      []string{},
-		Workflows:  []string{},
-		Guidelines: []string{},
+		Items: []NewBlock{},
 	}
 
-	// Regex to match :::new TYPE:NAME blocks (parser syntax)
-	// Example: :::new rule:simple-test
-	re := regexp.MustCompile(`(?m)^:::new\s+(rule|workflow|guideline):([a-z0-9/_-]+)\s*$`)
+	// Regex to match :::new TYPE:NAME blocks (any type allowed)
+	// Example: :::new rule:simple-test, :::new prompt:code-review
+	re := regexp.MustCompile(`(?m)^:::new\s+([a-z0-9_-]+):([a-z0-9/_-]+)\s*$`)
 	matches := re.FindAllStringSubmatch(content, -1)
 
 	for _, match := range matches {
@@ -29,30 +32,18 @@ func detectNewBlocks(content string) NewBlocksContent {
 		itemType := match[1]
 		name := match[2]
 
-		switch itemType {
-		case "rule":
-			if !contains(result.Rules, name) {
-				result.Rules = append(result.Rules, name)
+		// Check for duplicates
+		found := false
+		for _, item := range result.Items {
+			if item.Type == itemType && item.Name == name {
+				found = true
+				break
 			}
-		case "workflow":
-			if !contains(result.Workflows, name) {
-				result.Workflows = append(result.Workflows, name)
-			}
-		case "guideline":
-			if !contains(result.Guidelines, name) {
-				result.Guidelines = append(result.Guidelines, name)
-			}
+		}
+		if !found {
+			result.Items = append(result.Items, NewBlock{Type: itemType, Name: name})
 		}
 	}
 
 	return result
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

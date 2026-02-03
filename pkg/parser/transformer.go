@@ -61,12 +61,8 @@ func (t *DirectiveTransformer) expandListBlock(listBlock *ListBlock, doc *ast.Do
 			continue
 		}
 
-		// Add a heading with the item name
-		heading := ast.NewHeading(3)
-		heading.AppendChild(heading, ast.NewString([]byte(itemName)))
-		listBlock.AppendChild(listBlock, heading)
-
-		// Add the content as a paragraph
+		// Add the content directly without a heading
+		// (user can include their own heading in the item content)
 		para := ast.NewParagraph()
 		para.AppendChild(para, ast.NewString([]byte(content)))
 		listBlock.AppendChild(listBlock, para)

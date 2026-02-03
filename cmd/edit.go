@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"agmd/pkg/registry"
@@ -12,35 +14,64 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var editContent string
+
 var editCmd = &cobra.Command{
 	Use:   "edit [type:name]",
-	Short: "Edit any registry item in your default editor",
-	Long: `Open a registry item in your default editor (specified by $EDITOR environment variable).
-Falls back to vim if $EDITOR is not set.
+	Short: "Edit directives.md or a registry item",
+	Long: `Open directives.md or a registry item in your default editor.
 
-Supports any type (rule, workflow, guideline, profile, or custom types).
+Without arguments, opens directives.md in the current directory.
+With type:name argument, opens that item from the registry.
 
 Examples:
-  agmd edit rule:typescript
-  agmd edit workflow:release
-  agmd edit guideline:code-style
-  agmd edit profile:default
-  agmd edit custom_type:my-item
-  EDITOR=nano agmd edit rule:custom-auth`,
+  agmd edit                    # Edit directives.md
+  agmd edit rule:typescript    # Edit rule from registry
+  agmd edit framework:agmd     # Edit custom type from registry
+  agmd edit profile:default    # Edit a profile template
+
+For AI assistants (non-interactive):
+  agmd edit rule:test --content "# Updated content"
+  echo "New content" | agmd edit rule:test`,
 	RunE: runEdit,
 }
 
 func init() {
 	rootCmd.AddCommand(editCmd)
+	editCmd.Flags().StringVar(&editContent, "content", "", "Replace content (skips editor)")
 }
 
 func runEdit(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
 
-	// Require type:name argument
-	if len(args) != 1 {
-		return fmt.Errorf("usage: agmd edit TYPE:NAME (e.g., 'agmd edit rule:typescript')")
+	// Determine content source (for non-interactive editing)
+	var newContent string
+	if editContent != "" {
+		newContent = editContent
+	} else if !isTerminal(os.Stdin) {
+		stdinContent, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read from stdin: %w", err)
+		}
+		newContent = string(stdinContent)
+	}
+
+	// No arguments = edit directives.md
+	if len(args) == 0 {
+		if _, err := os.Stat(directivesMdFilename); os.IsNotExist(err) {
+			return fmt.Errorf("directives.md not found\nRun 'agmd init' first")
+		}
+
+		if newContent != "" {
+			if err := os.WriteFile(directivesMdFilename, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf("failed to write directives.md: %w", err)
+			}
+			fmt.Printf("%s Updated directives.md\n", green("ok"))
+			return nil
+		}
+
+		return openInEditor(directivesMdFilename)
 	}
 
 	// Parse type:name
@@ -57,51 +88,73 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	// Get registry paths
-	paths := reg.Paths()
-	var basePath string
-
-	// Handle known types first
-	switch itemType {
-	case "rule":
-		basePath = paths.Rules
-	case "workflow":
-		basePath = paths.Workflows
-	case "guideline":
-		basePath = paths.Guidelines
-	case "profile":
-		basePath = paths.Profiles
-	default:
-		// For custom types, use registry base path + type directory
-		basePath = fmt.Sprintf("%s/%ss", reg.BasePath, itemType)
-	}
-
-	filePath := fmt.Sprintf("%s/%s.md", basePath, name)
+	// Build file path
+	filePath := filepath.Join(reg.BasePath, itemType, name+".md")
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return fmt.Errorf("%s:%s does not exist at %s", itemType, name, filePath)
+		return fmt.Errorf("%s:%s not found at %s", itemType, name, filePath)
 	}
 
-	// Get editor from environment, default to vim
+	// Non-interactive edit
+	if newContent != "" {
+		// Preserve frontmatter, replace content
+		existingContent, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+
+		// Extract frontmatter
+		frontmatter := extractFrontmatterString(string(existingContent))
+
+		var updatedContent string
+		if frontmatter != "" {
+			updatedContent = frontmatter + "\n" + strings.TrimSpace(newContent)
+		} else {
+			// Add default frontmatter
+			updatedContent = fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n%s", name, strings.TrimSpace(newContent))
+		}
+
+		if err := os.WriteFile(filePath, []byte(updatedContent), 0644); err != nil {
+			return fmt.Errorf("failed to write file: %w", err)
+		}
+		fmt.Printf("%s Updated %s:%s\n", green("ok"), itemType, name)
+		return nil
+	}
+
+	fmt.Printf("%s Opening %s:%s...\n", blue("->"), itemType, name)
+	return openInEditor(filePath)
+}
+
+// extractFrontmatterString extracts frontmatter (including delimiters) from content
+func extractFrontmatterString(content string) string {
+	if !strings.HasPrefix(content, "---\n") {
+		return ""
+	}
+
+	// Find closing ---
+	endIdx := strings.Index(content[4:], "\n---")
+	if endIdx == -1 {
+		return ""
+	}
+
+	return content[:4+endIdx+4] + "\n"
+}
+
+// openInEditor opens a file in the user's editor
+func openInEditor(filePath string) error {
 	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
 	if editor == "" {
 		editor = "vim"
 	}
 
-	fmt.Printf("%s Opening %s:%s (%s) in %s...\n", blue("→"), itemType, name, filePath, editor)
-
-	// Create command to open editor
 	editorCmd := exec.Command(editor, filePath)
 	editorCmd.Stdin = os.Stdin
 	editorCmd.Stdout = os.Stdout
 	editorCmd.Stderr = os.Stderr
 
-	// Run editor
-	if err := editorCmd.Run(); err != nil {
-		return fmt.Errorf("failed to open editor: %w", err)
-	}
-
-	fmt.Printf("%s Editing complete\n", green("✓"))
-	return nil
+	return editorCmd.Run()
 }

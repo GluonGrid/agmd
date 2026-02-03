@@ -15,17 +15,17 @@ import (
 var mvCmd = &cobra.Command{
 	Use:   "mv [type:name] [new-path]",
 	Short: "Move a registry item to a different location or subfolder",
-	Long: `Move a rule, workflow, or guideline to a different location in the registry.
+	Long: `Move an item to a different location in the registry.
 
 Supports:
 - Moving to subfolders: agmd mv rule:typescript frontend/typescript
 - Renaming: agmd mv rule:old-name new-name
-- Moving between types: agmd mv rule:typescript workflow:typescript
+- Moving between types: agmd mv rule:typescript prompt:typescript
 
 Examples:
   agmd mv rule:typescript frontend/typescript    # Move to subfolder
   agmd mv rule:old-name new-name                 # Rename
-  agmd mv workflow:test frontend/test            # Move workflow to subfolder`,
+  agmd mv workflow:test frontend/test            # Move to subfolder`,
 	Args: cobra.ExactArgs(2),
 	RunE: runMv,
 }
@@ -71,20 +71,8 @@ func runMv(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
 
-	paths := reg.Paths()
-
 	// Get source path
-	var sourceBasePath string
-	switch sourceType {
-	case "rule":
-		sourceBasePath = paths.Rules
-	case "workflow":
-		sourceBasePath = paths.Workflows
-	case "guideline":
-		sourceBasePath = paths.Guidelines
-	default:
-		sourceBasePath = filepath.Join(reg.BasePath, sourceType)
-	}
+	sourceBasePath := reg.TypePath(sourceType)
 
 	sourcePath := filepath.Join(sourceBasePath, sourceName+".md")
 
@@ -94,34 +82,23 @@ func runMv(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get destination path
-	var destBasePath string
-	switch destType {
-	case "rule":
-		destBasePath = paths.Rules
-	case "workflow":
-		destBasePath = paths.Workflows
-	case "guideline":
-		destBasePath = paths.Guidelines
-	default:
-		// Custom type - check if exists or create
-		destBasePath = filepath.Join(reg.BasePath, destType)
-		if _, err := os.Stat(destBasePath); os.IsNotExist(err) {
-			fmt.Printf("%s Type '%s' doesn't exist yet.\n", yellow("⚠"), destType)
-			fmt.Printf("\nCreate new type '%s'? (y/N): ", destType)
+	destBasePath := reg.TypePath(destType)
+	if _, err := os.Stat(destBasePath); os.IsNotExist(err) {
+		fmt.Printf("%s Type '%s' doesn't exist yet.\n", yellow("⚠"), destType)
+		fmt.Printf("\nCreate new type '%s'? (y/N): ", destType)
 
-			var response string
-			fmt.Scanln(&response)
-			response = strings.ToLower(strings.TrimSpace(response))
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
 
-			if response != "y" && response != "yes" {
-				return fmt.Errorf("cancelled")
-			}
-
-			if err := os.MkdirAll(destBasePath, 0755); err != nil {
-				return fmt.Errorf("failed to create type folder: %w", err)
-			}
-			fmt.Printf("%s Created new type: %s\n", green("✓"), destType)
+		if response != "y" && response != "yes" {
+			return fmt.Errorf("cancelled")
 		}
+
+		if err := os.MkdirAll(destBasePath, 0755); err != nil {
+			return fmt.Errorf("failed to create type folder: %w", err)
+		}
+		fmt.Printf("%s Created new type: %s\n", green("✓"), destType)
 	}
 
 	destPath := filepath.Join(destBasePath, destName+".md")

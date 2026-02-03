@@ -21,9 +21,7 @@ var promoteCmd = &cobra.Command{
 	Short: "Promote :::new blocks from directives.md to registry",
 	Long: `Promote :::new blocks from directives.md to the registry.
 This extracts content from :::new markers, saves it to ~/.agmd/,
-and replaces the :::new block with an @reference.
-
-Run 'agmd validate' first to see available :::new blocks.
+and replaces the :::new block with :::include directive.
 
 Interactive mode (no arguments):
   agmd promote
@@ -33,13 +31,12 @@ Promote all at once:
 
 Specific item:
   agmd promote rule:custom-auth
-  agmd promote workflow:deploy-process
+  agmd promote prompt:code-review
 
 Examples:
-  agmd validate              # First, check for :::new blocks
   agmd promote               # Interactive: select which items to promote
   agmd promote --all         # Promote all :::new blocks automatically
-  agmd promote rule:auth     # Promote specific rule`,
+  agmd promote rule:auth     # Promote specific item`,
 	RunE: runPromote,
 }
 
@@ -73,9 +70,8 @@ func runPromote(cmd *cobra.Command, args []string) error {
 	// Detect :::new blocks
 	newBlocks := detectNewBlocks(directivesContent)
 
-	if len(newBlocks.Rules) == 0 && len(newBlocks.Workflows) == 0 && len(newBlocks.Guidelines) == 0 {
+	if len(newBlocks.Items) == 0 {
 		fmt.Printf("%s No :::new blocks found\n", green("✓"))
-		fmt.Println("\nRun 'agmd validate' first to detect :::new blocks.")
 		return nil
 	}
 
@@ -104,45 +100,19 @@ func promoteAllBlocks(newBlocks NewBlocksContent, directivesContent string, reg 
 	yellow := color.New(color.FgYellow).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
 
-	totalBlocks := len(newBlocks.Rules) + len(newBlocks.Workflows) + len(newBlocks.Guidelines)
-	if totalBlocks == 0 {
+	if len(newBlocks.Items) == 0 {
 		fmt.Printf("%s No :::new blocks to promote\n", green("✓"))
 		return nil
 	}
 
-	fmt.Printf("%s Found %d :::new blocks to promote\n", blue("→"), totalBlocks)
+	fmt.Printf("%s Found %d :::new blocks to promote\n", blue("→"), len(newBlocks.Items))
 	fmt.Println()
-
-	// Collect all items
-	allItems := []struct {
-		Type string
-		Name string
-	}{}
-
-	for _, name := range newBlocks.Rules {
-		allItems = append(allItems, struct {
-			Type string
-			Name string
-		}{"rule", name})
-	}
-	for _, name := range newBlocks.Workflows {
-		allItems = append(allItems, struct {
-			Type string
-			Name string
-		}{"workflow", name})
-	}
-	for _, name := range newBlocks.Guidelines {
-		allItems = append(allItems, struct {
-			Type string
-			Name string
-		}{"guideline", name})
-	}
 
 	// Promote all
 	promoted := 0
 	updatedContent := directivesContent
 
-	for _, item := range allItems {
+	for _, item := range newBlocks.Items {
 		fmt.Printf("%s Promoting %s:%s\n", blue("→"), item.Type, item.Name)
 		newContent, err := promoteSingleToRegistry(item.Type, item.Name, updatedContent, reg)
 		if err != nil {
@@ -158,7 +128,7 @@ func promoteAllBlocks(newBlocks NewBlocksContent, directivesContent string, reg 
 		if err := os.WriteFile(directivesMdFilename, []byte(updatedContent), 0644); err != nil {
 			return fmt.Errorf("failed to write directives.md: %w", err)
 		}
-		fmt.Printf("\n%s Complete! %d/%d items promoted to registry and directives.md updated.\n", green("✓"), promoted, totalBlocks)
+		fmt.Printf("\n%s Complete! %d/%d items promoted to registry and directives.md updated.\n", green("✓"), promoted, len(newBlocks.Items))
 		fmt.Printf("%s Run 'agmd sync' to update AGENTS.md\n", blue("ℹ"))
 	}
 
@@ -169,56 +139,16 @@ func promoteInteractive(newBlocks NewBlocksContent, directivesContent string, re
 	green := color.New(color.FgGreen).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
-	cyan := color.New(color.FgCyan).SprintFunc()
 
 	reader := bufio.NewReader(os.Stdin)
 
 	// Show what's available
 	fmt.Printf("%s Found :::new blocks:\n\n", blue("→"))
 
-	allItems := []struct {
-		Type string
-		Name string
-	}{}
-
-	if len(newBlocks.Rules) > 0 {
-		fmt.Printf("%s Rules:\n", cyan("●"))
-		for i, name := range newBlocks.Rules {
-			fmt.Printf("  %d. %s\n", i+1, name)
-			allItems = append(allItems, struct {
-				Type string
-				Name string
-			}{"rule", name})
-		}
-		fmt.Println()
+	for i, item := range newBlocks.Items {
+		fmt.Printf("  %d. %s:%s\n", i+1, item.Type, item.Name)
 	}
-
-	offset := len(newBlocks.Rules)
-
-	if len(newBlocks.Workflows) > 0 {
-		fmt.Printf("%s Workflows:\n", cyan("●"))
-		for i, name := range newBlocks.Workflows {
-			fmt.Printf("  %d. %s\n", offset+i+1, name)
-			allItems = append(allItems, struct {
-				Type string
-				Name string
-			}{"workflow", name})
-		}
-		fmt.Println()
-		offset += len(newBlocks.Workflows)
-	}
-
-	if len(newBlocks.Guidelines) > 0 {
-		fmt.Printf("%s Guidelines:\n", cyan("●"))
-		for i, name := range newBlocks.Guidelines {
-			fmt.Printf("  %d. %s\n", offset+i+1, name)
-			allItems = append(allItems, struct {
-				Type string
-				Name string
-			}{"guideline", name})
-		}
-		fmt.Println()
-	}
+	fmt.Println()
 
 	// Ask which to promote
 	fmt.Print("Promote which items? (comma-separated numbers, 'all', or 'none'): ")
@@ -230,24 +160,21 @@ func promoteInteractive(newBlocks NewBlocksContent, directivesContent string, re
 		return nil
 	}
 
-	var selectedItems []struct {
-		Type string
-		Name string
-	}
+	var selectedItems []NewBlock
 
 	if response == "all" {
-		selectedItems = allItems
+		selectedItems = newBlocks.Items
 	} else {
 		// Parse numbers
 		parts := strings.Split(response, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			num, err := strconv.Atoi(part)
-			if err != nil || num < 1 || num > len(allItems) {
+			if err != nil || num < 1 || num > len(newBlocks.Items) {
 				fmt.Printf("%s Invalid selection: %s\n", yellow("⚠"), part)
 				continue
 			}
-			selectedItems = append(selectedItems, allItems[num-1])
+			selectedItems = append(selectedItems, newBlocks.Items[num-1])
 		}
 	}
 
@@ -261,7 +188,7 @@ func promoteInteractive(newBlocks NewBlocksContent, directivesContent string, re
 	updatedContent := directivesContent
 
 	for _, item := range selectedItems {
-		fmt.Printf("\n%s Promoting %s: %s\n", blue("→"), item.Type, item.Name)
+		fmt.Printf("\n%s Promoting %s:%s\n", blue("→"), item.Type, item.Name)
 		newContent, err := promoteSingleToRegistry(item.Type, item.Name, updatedContent, reg)
 		if err != nil {
 			fmt.Printf("%s Failed: %v\n", yellow("⚠"), err)
@@ -308,7 +235,8 @@ func promoteSingleToRegistry(itemType, name string, directivesContent string, re
 
 	// Extract :::new TYPE:NAME block content (parser syntax)
 	// Example: :::new rule:simple-test
-	blockPattern := fmt.Sprintf(`(?s):::new\s+%s:%s\s*\n(.*?)\n:::`, regexp.QuoteMeta(itemType), regexp.QuoteMeta(name))
+	// Match the full block including :::end
+	blockPattern := fmt.Sprintf(`(?s):::new\s+%s:%s\s*\n(.*?)\n:::end`, regexp.QuoteMeta(itemType), regexp.QuoteMeta(name))
 	re := regexp.MustCompile(blockPattern)
 	match := re.FindStringSubmatch(directivesContent)
 
@@ -322,18 +250,7 @@ func promoteSingleToRegistry(itemType, name string, directivesContent string, re
 	fmt.Printf("%s Extracted content from :::new block\n", green("✓"))
 
 	// Check if already exists in registry
-	paths := reg.Paths()
-	var basePath string
-	switch itemType {
-	case "rule":
-		basePath = paths.Rules
-	case "workflow":
-		basePath = paths.Workflows
-	case "guideline":
-		basePath = paths.Guidelines
-	default:
-		return "", fmt.Errorf("unsupported type: %s", itemType)
-	}
+	basePath := reg.TypePath(itemType)
 
 	filePath := fmt.Sprintf("%s/%s.md", basePath, name)
 
@@ -342,12 +259,16 @@ func promoteSingleToRegistry(itemType, name string, directivesContent string, re
 		return "", fmt.Errorf("%s:%s already exists in registry at %s", itemType, name, filePath)
 	}
 
+	// Create type directory if it doesn't exist
+	if err := os.MkdirAll(basePath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create type directory: %w", err)
+	}
+
 	// Create subdirectories if needed (e.g., auth/custom-auth)
-	fileDir := fmt.Sprintf("%s/%s", basePath, name)
 	if strings.Contains(name, "/") {
 		// Extract directory path without filename
 		lastSlash := strings.LastIndex(name, "/")
-		fileDir = fmt.Sprintf("%s/%s", basePath, name[:lastSlash])
+		fileDir := fmt.Sprintf("%s/%s", basePath, name[:lastSlash])
 		if err := os.MkdirAll(fileDir, 0755); err != nil {
 			return "", fmt.Errorf("failed to create subdirectories: %w", err)
 		}

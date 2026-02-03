@@ -17,8 +17,8 @@ var deleteForce bool
 var deleteCmd = &cobra.Command{
 	Use:     "delete [type:name]",
 	Aliases: []string{"del", "rm"},
-	Short:   "Delete a rule, workflow, or guideline from the registry",
-	Long: `Delete a rule, workflow, or guideline from the registry.
+	Short:   "Delete an item from the registry",
+	Long: `Delete an item from the registry.
 
 This command removes items from the registry (~/.agmd/) permanently.
 A confirmation prompt will be shown unless --force is used.
@@ -29,9 +29,8 @@ Format:
 Examples:
   agmd delete rule:typescript            # Delete a rule
   agmd rm workflow:old-workflow          # Delete a workflow (using alias)
-  agmd del guideline:deprecated          # Delete a guideline (using alias)
-  agmd delete rule:frontend/old --force  # Delete without confirmation
-  agmd delete instruction:custom         # Delete from custom type`,
+  agmd del prompt:deprecated             # Delete a prompt (using alias)
+  agmd delete rule:frontend/old --force  # Delete without confirmation`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDelete,
 }
@@ -66,23 +65,10 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
 
-	paths := reg.Paths()
-
 	// Get item path
-	var basePath string
-	switch itemType {
-	case "rule":
-		basePath = paths.Rules
-	case "workflow":
-		basePath = paths.Workflows
-	case "guideline":
-		basePath = paths.Guidelines
-	default:
-		// Custom type
-		basePath = filepath.Join(reg.BasePath, itemType)
-		if _, err := os.Stat(basePath); os.IsNotExist(err) {
-			return fmt.Errorf("type '%s' does not exist in registry", itemType)
-		}
+	basePath := reg.TypePath(itemType)
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return fmt.Errorf("type '%s' does not exist in registry", itemType)
 	}
 
 	itemPath := filepath.Join(basePath, name+".md")
@@ -150,9 +136,8 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	// Warning about directives.md
-	fmt.Printf("\n%s If this item is referenced in directives.md, you should remove or update the reference:\n", yellow("ℹ"))
-	fmt.Printf("  @%s:%s\n", itemType, name)
-	fmt.Printf("\nOr if used in :::new markers, those sections will need to be updated.\n")
+	fmt.Printf("\n%s If this item is referenced in directives.md, remove or update the reference:\n", yellow("ℹ"))
+	fmt.Printf("  :::include %s:%s\n", itemType, name)
 
 	return nil
 }

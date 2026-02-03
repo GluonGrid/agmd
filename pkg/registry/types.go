@@ -1,53 +1,23 @@
 package registry
 
-import "time"
-
-// Rule represents a rule in the registry
-type Rule struct {
-	Name        string    `yaml:"name"`
-	Category    string    `yaml:"category,omitempty"`
-	Description string    `yaml:"description,omitempty"`
-	CreatedAt   time.Time `yaml:"created_at,omitempty"`
-	Content     string    // Markdown content (below frontmatter)
-	FilePath    string    // Path to the .md file
-}
-
-// Workflow represents a workflow in the registry
-type Workflow struct {
-	Name        string    `yaml:"name"`
-	Description string    `yaml:"description,omitempty"`
-	CreatedAt   time.Time `yaml:"created_at,omitempty"`
-	Content     string    // Markdown content
-	FilePath    string
-}
-
-// Guideline represents a guideline in the registry
-type Guideline struct {
-	Name        string    `yaml:"name"`
-	Description string    `yaml:"description,omitempty"`
-	CreatedAt   time.Time `yaml:"created_at,omitempty"`
-	Content     string    // Markdown content
-	FilePath    string
-}
-
-// Profile represents a directives.md template in the registry
-type Profile struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description,omitempty"`
-	Content     string // Full directives.md template content
+// Item represents a generic registry item (rule, workflow, guideline, or custom type)
+type Item struct {
+	Type        string // e.g., "rule", "workflow", "framework"
+	Name        string
+	Description string
+	Content     string // Markdown content (below frontmatter)
 	FilePath    string // Path to the .md file
 }
 
-// Registry manages the ~/.agmd/ directory structure
-type Registry struct {
-	BasePath string // ~/.agmd
+// Profile represents a directives.md template
+type Profile struct {
+	Name        string
+	Description string
+	Content     string // Full directives.md template content
+	FilePath    string
 }
 
-// RegistryPaths contains all registry subdirectory paths
-type RegistryPaths struct {
-	Base       string // ~/.agmd
-	Rules      string // ~/.agmd/rule
-	Workflows  string // ~/.agmd/workflow
-	Guidelines string // ~/.agmd/guideline
-	Profiles   string // ~/.agmd/profile
+// Registry manages the ~/.agmd/ directory
+type Registry struct {
+	BasePath string // ~/.agmd
 }

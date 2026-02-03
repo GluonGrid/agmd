@@ -65,7 +65,7 @@ agmd setup
 
 # In any project
 agmd init              # Create directives.md
-agmd add rule:typescript
+agmd edit              # Add directives (opens editor)
 agmd sync              # Generate AGENTS.md
 ```
 
@@ -91,14 +91,15 @@ agmd creates `~/.agmd/` to store your reusable content:
 
 ```
 ~/.agmd/
-├── rule/            # Coding rules (typescript.md, no-console.md, ...)
-├── workflow/        # Process workflows (commit.md, deploy.md, ...)
-├── guideline/       # Best practices (code-style.md, testing.md, ...)
-├── profile/         # Project templates (svelte-kit.md, fastapi.md, ...)
-└── <custom>/        # Your own categories (prompts/, templates/, ...)
+├── profile/         # Project templates (default.md, svelte-kit.md, ...)
+└── <your-types>/    # Create any structure you need
+    ├── rule/        # e.g., typescript.md, no-console.md
+    ├── workflow/    # e.g., commit.md, deploy.md
+    ├── prompt/      # e.g., code-review.md
+    └── anything/    # Your own categories
 ```
 
-You can create any folder structure that makes sense for your workflow.
+There are no predefined folders—you create whatever structure makes sense for your workflow. Just use `agmd new type:name` and the type folder is created automatically.
 
 ### 2. Simple Directive Syntax
 
@@ -139,10 +140,10 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd setup` | Initialize your `~/.agmd/` registry |
 | `agmd init [profile:name]` | Create `directives.md` in current project |
 | `agmd sync` | Generate `AGENTS.md` from `directives.md` |
-| `agmd add type:name` | Add an item to `directives.md` |
-| `agmd remove type:name` | Remove an item from `directives.md` |
+| `agmd edit [type:name]` | Edit `directives.md` (default) or a registry item |
 | `agmd new type:name` | Create a new item in the registry |
-| `agmd list` | List all registry items (shows active items) |
+| `agmd show type:name` | Display item content (useful for AI assistants) |
+| `agmd list [type]` | List registry items (all types or specific type) |
 | `agmd promote` | Promote `:::new` blocks to registry (required before sync) |
 | `agmd migrate <file>` | Migrate a raw CLAUDE.md/AGENTS.md to agmd format |
 | `agmd collect [-f file]` | Collect rules from an agmd project into your registry |
@@ -233,14 +234,14 @@ agmd new rule:typescript
 # 2. Use it in project A
 cd ~/projects/frontend-app
 agmd init
-agmd add rule:typescript
+agmd edit              # Add :::include rule:typescript
 agmd sync
 # → AGENTS.md now has your TypeScript standards
 
 # 3. Use the same rule in project B
 cd ~/projects/api-server
 agmd init
-agmd add rule:typescript
+agmd edit              # Add :::include rule:typescript
 agmd sync
 # → Same standards, zero copy-paste
 
@@ -300,13 +301,31 @@ agmd works out of the box with sensible defaults:
 4. **Personal registry** - Your standards, your way
 5. **Simple syntax** - Learn 3 directives: `:::include`, `:::list`, `:::new`
 
+## AI Assistant Integration
+
+agmd is designed to be used by AI coding assistants. All commands support non-interactive modes:
+
+```bash
+# Read content without opening editor
+agmd show rule:typescript
+agmd show rule:typescript --raw    # Include frontmatter
+
+# Create items without editor
+agmd new rule:test --no-editor
+agmd new rule:test --content "# My Rule\nContent here"
+echo "# My Rule" | agmd new rule:test
+
+# Update items without editor
+agmd edit rule:test --content "# Updated content"
+echo "New content" | agmd edit rule:test
+```
+
 ## Roadmap
 
 Planned features for future releases:
 
 - **Agent Skills support** - Integration with the [Agent Skills](https://agentskills.io) specification for portable, reusable AI agent capabilities
 - **Multiple output targets** - Support for `directives.test.md` → `TEST.md` and other custom mappings
-- **LLM-friendly CLI** - Non-interactive flags (`--no-editor`, `--content`) for AI agents to manage rules programmatically
 - **Registry sharing** - Import/export registries, share rule packs with teams
 
 ## Contributing
