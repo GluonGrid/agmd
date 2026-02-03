@@ -1,0 +1,5 @@
+{
+  "name": "agmd - AI Agent CLI",
+  "description": "A landing page for agmd, the CLI for AI agentic assistants featuring a dark, developer-focused terminal aesthetic.",
+  "requestFramePermissions": []
+}

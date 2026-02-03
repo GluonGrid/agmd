@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agmd | The CLI for AI agentic assistants</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        // Catppuccin Frappé Palette
+                        "primary": "#8caaee", // Blue
+                        "secondary": "#ca9ee6", // Mauve
+                        "accent-green": "#a6d189", // Green
+                        "accent-red": "#e78284", // Red
+                        "accent-peach": "#ef9f76", // Peach
+                        "background-base": "#303446", // Base
+                        "background-mantle": "#292c3c", // Mantle (Darker)
+                        "background-crust": "#232634", // Crust (Darkest)
+                        "surface": "#414559", // Surface 0
+                        "surface-1": "#51576d", // Surface 1
+                        "text-main": "#c6d0f5", // Text
+                        "text-sub": "#a5adce", // Subtext 0
+                        "border-color": "#414559", // Surface 0
+                    },
+                    fontFamily: {
+                        "sans": ["Space Grotesk", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: {
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "2xl": "1rem",
+                        "3xl": "1.5rem",
+                    },
+                    animation: {
+                        'blink': 'blink 1s step-end infinite',
+                    },
+                    keyframes: {
+                        blink: {
+                            '0%, 100%': { opacity: '1' },
+                            '50%': { opacity: '0' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        body {
+            @apply font-sans bg-background-base text-text-main selection:bg-primary/30;
+        }
+        .terminal-glow {
+            box-shadow: 0 0 50px -15px rgba(140, 170, 238, 0.3);
+        }
+        /* Enhanced hover glow for comparison cards */
+        .glow-hover {
+            transition: all 0.3s ease;
+        }
+        .glow-hover:hover {
+            box-shadow: 0 0 40px -5px rgba(140, 170, 238, 0.25);
+            border-color: rgba(140, 170, 238, 0.6);
+        }
+        .glow-hover-red:hover {
+            box-shadow: 0 0 40px -5px rgba(231, 130, 132, 0.25);
+            border-color: rgba(231, 130, 132, 0.6);
+        }
+        /* Custom scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.1);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(165, 173, 206, 0.3);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(165, 173, 206, 0.5);
+        }
+    </style>
+
+<link rel="stylesheet" href="/index.css">
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/agmd/assets/index-Sf1WoNCT.js"></script>
+</head>
+  <body>
+    <div id="root"></div>
+</body>
+</html>
