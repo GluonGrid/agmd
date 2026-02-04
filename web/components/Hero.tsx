@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 export const Hero: React.FC = () => {
   const [copied, setCopied] = useState(false);
-  const installCmd = 'curl -fsSL https://raw.githubusercontent.com/GluonGrid/agmd/main/install.sh | bash';
+  const installCmd = 'curl -fsSL https://gluongrid.dev/agmd/install.sh | bash';
 
   const handleCopy = () => {
     navigator.clipboard.writeText(installCmd);
@@ -49,7 +49,7 @@ export const Hero: React.FC = () => {
               <code className="text-text-main flex flex-nowrap gap-x-2 whitespace-nowrap">
                 <span className="text-primary">curl</span>
                 <span className="text-text-sub">-fsSL</span>
-                <span>https://raw.githubusercontent.com/GluonGrid/agmd/main/install.sh</span>
+                <span>https://gluongrid.dev/agmd/install.sh</span>
                 <span className="text-text-sub">|</span>
                 <span className="text-secondary">bash</span>
               </code>
