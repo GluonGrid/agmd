@@ -1,4 +1,4 @@
-# agmd v2 - Enhanced Profiles, Files & Docs
+# agmd v2 - Enhanced Profiles, Files, Docs & Tasks
 
 ## Overview
 
@@ -7,7 +7,17 @@ Enhance agmd to support:
 2. **Files as-is** - Store raw files (not .md wrapped)
 3. **Docs linking** - Symlink documentation folders for AI context
 4. **Dynamic doc directive** - Auto-expand linked docs in AGENTS.md
-5. **Agent Skills support** - Future integration with agentskills.io
+5. **Task management** - Project-based task tracking with dependencies
+6. **Agent Skills support** - Future integration with agentskills.io
+
+## Reserved Types
+
+The following types have special behavior and cannot be overridden:
+- `task/` - Task management (per-project)
+- `doc/` - Documentation folders (symlinked)
+- `file/` - Raw files (no .md wrapper, no frontmatter)
+- `profile/` - Project templates (with `files:` support)
+- `guide/` - Guides (default: guide:agmd)
 
 ---
 
@@ -303,6 +313,162 @@ skills:
 2. Auto-detect linked docs
 3. Expand to documentation list
 
-### Phase 5: Skills (Future)
+### Phase 5: Task Management
+1. `task/` type with project-based organization
+2. `agmd task` subcommand for status/dependencies
+3. Auto-sorted list by dependency readiness
+4. Delete with `agmd delete task:name`
+
+### Phase 6: Skills (Future)
 1. Agent Skills spec alignment
 2. Skill import/export
+
+---
+
+## 7. Task Management
+
+### Concept
+
+Project-based task tracking with dependencies. Similar to Claude Code's task system but stored in the agmd registry, organized by project (cwd name).
+
+### Structure
+
+```
+~/.agmd/
+├── task/                           # Reserved: Tasks by project
+│   ├── agent-md/                   # Project name (basename of cwd)
+│   │   ├── setup-database.md
+│   │   ├── create-api.md
+│   │   └── write-tests.md
+│   └── other-project/
+│       └── init.md
+├── doc/
+├── file/
+├── profile/
+└── rule/
+```
+
+### Task File Format
+
+```yaml
+---
+subject: Set up database schema
+status: pending                     # pending | in_progress | completed
+depends_on: []                      # Task IDs this depends on
+---
+
+Create the initial database schema with users and posts tables.
+This is the foundation that other tasks depend on.
+```
+
+**Example with dependencies:**
+
+```yaml
+---
+subject: Create API endpoints
+status: pending
+depends_on: [setup-database]
+---
+
+Create REST API endpoints for users and posts.
+```
+
+### Auto-Computed Status
+
+Status is computed at display time (no file changes needed):
+- `[ready]` - All dependencies completed (or no dependencies)
+- `[blocked]` - Has pending dependencies
+- `[in_progress]` - Manually set to in_progress
+- `[completed]` - Done
+
+### Auto-Sorted Display
+
+When listing tasks, they are automatically sorted:
+1. **Ready tasks** (can start now)
+2. **Blocked tasks** (waiting on dependencies)
+3. **Completed tasks** (shown with `--all`, hidden by default)
+
+### Commands
+
+```bash
+# Create task (project = basename of cwd)
+agmd new task:setup-database --content "Create database schema..."
+agmd new task:create-api --content "Create endpoints" --blocked-by "setup-database"
+
+# Create for specific project
+agmd new task:setup-database --project other-name --content "..."
+
+# List tasks (auto-sorted: ready → blocked → completed)
+agmd list task                      # Current project
+agmd list task --project foo        # Specific project
+agmd list task --all                # Include completed tasks
+
+# Show task
+agmd show task:setup-database                   # Current project
+agmd show task:other-project/setup-database     # Specific project
+
+# Show all tasks with content
+agmd show task --all                # All tasks for current project
+
+# Delete task (consistent with other types)
+agmd delete task:setup-database
+agmd delete task:setup-database --force
+
+# Task subcommand for status/dependencies
+agmd task status setup-database pending
+agmd task status setup-database in_progress
+agmd task status setup-database completed
+
+agmd task blocked-by create-api setup-database    # Add: create-api depends on setup-database
+agmd task unblock create-api setup-database       # Remove dependency
+```
+
+### Example Flow
+
+**Initial state:**
+```
+$ agmd list task
+
+Tasks for: agent-md (3 tasks)
+
+[ready] setup-database
+  Set up database schema
+
+[blocked] create-api (waiting: setup-database)
+  Create API endpoints
+
+[blocked] write-tests (waiting: setup-database, create-api)
+  Write tests
+```
+
+**After completing setup-database:**
+```
+$ agmd task status setup-database completed
+$ agmd list task
+
+Tasks for: agent-md (3 tasks)
+
+[ready] create-api
+  Create API endpoints
+
+[blocked] write-tests (waiting: create-api)
+  Write tests
+
+[completed] setup-database ✓
+  Set up database schema
+```
+
+### Tasks
+
+- [ ] Add `task/` as reserved type with project-based folders
+- [ ] Task frontmatter: `subject`, `status`, `depends_on`
+- [ ] `agmd new task:name` with `--project`, `--blocked-by` flags
+- [ ] `agmd list task` with auto-sorting (ready → blocked → completed)
+- [ ] `agmd list task --all` to include completed
+- [ ] `agmd show task:name` and `agmd show task --all`
+- [ ] `agmd delete task:name` (consistent with other types)
+- [ ] `agmd task status <name> <status>` subcommand
+- [ ] `agmd task blocked-by <task> <dependency>` subcommand
+- [ ] `agmd task unblock <task> <dependency>` subcommand
+- [ ] Compute ready/blocked status at display time
+- [ ] Dependency tree visualization in list output
