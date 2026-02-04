@@ -17,6 +17,7 @@ export const VideoSection: React.FC = () => {
   const [lines, setLines] = useState<{type: 'input' | 'output', content: string}[]>([]);
   const [currentCommandIndex, setCurrentCommandIndex] = useState(0);
   const [currentText, setCurrentText] = useState('');
+  const resetAfterOutputIndex = 5;
   
   useEffect(() => {
     let timeout: ReturnType<typeof setTimeout>;
@@ -54,6 +55,9 @@ export const VideoSection: React.FC = () => {
             setLines(prev => [...prev, { type: 'output', content: command.output }]);
         }
         timeout = setTimeout(() => {
+            if (currentCommandIndex === resetAfterOutputIndex) {
+              setLines([]);
+            }
             setCurrentCommandIndex(prev => prev + 1);
         }, command.delay);
       }

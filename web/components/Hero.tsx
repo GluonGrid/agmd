@@ -21,20 +21,31 @@ export const Hero: React.FC = () => {
         }}
       ></div>
 
-      <div className="relative z-10 max-w-5xl mx-auto px-6 text-center">
+      <div className="relative z-10 max-w-5xl mx-auto px-6 text-center flex flex-col items-center">
         {/* Beta Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold tracking-wider uppercase mb-8 shadow-[0_0_10px_-2px_rgba(140,170,238,0.3)]">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-          </span>
-          v1.2.0 Available
+        <div className="flex justify-center w-full mb-8">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold tracking-wider uppercase shadow-[0_0_10px_-2px_rgba(140,170,238,0.3)]">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+            </span>
+            v0.2.0 Available
+          </div>
         </div>
 
         {/* Main Title */}
-        <h1 className="text-7xl md:text-9xl font-black tracking-tighter mb-6 bg-gradient-to-b from-text-main to-text-sub bg-clip-text text-transparent font-mono select-none">
-          agmd
-        </h1>
+        <div className="relative inline-block mb-6">
+          <div
+            className="absolute -inset-6 md:-inset-10 rounded-full blur-3xl opacity-40 pointer-events-none"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(214,224,255,0.55) 0%, rgba(140,170,238,0.25) 45%, rgba(48,52,70,0) 70%)',
+            }}
+          ></div>
+          <h1 className="relative text-7xl md:text-9xl font-black tracking-tighter bg-gradient-to-b from-text-main to-text-sub bg-clip-text text-transparent font-mono select-none">
+            agmd
+          </h1>
+        </div>
 
         {/* Subtitle */}
         <p className="text-xl md:text-2xl text-text-sub max-w-2xl mx-auto mb-12 font-medium leading-relaxed">

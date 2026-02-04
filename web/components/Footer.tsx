@@ -17,23 +17,14 @@ export const Footer: React.FC = () => {
             <p className="text-text-sub max-w-xs mb-6 font-medium leading-relaxed">
               The modern standard for managing AI agent behaviors via directives.
             </p>
-            <div className="flex gap-4">
-              <a href="#" className="text-text-sub hover:text-primary transition-colors">
-                <span className="material-symbols-outlined">brand_family</span>
-              </a>
-              <a href="#" className="text-text-sub hover:text-primary transition-colors">
-                <span className="material-symbols-outlined">rss_feed</span>
-              </a>
-            </div>
           </div>
 
           {/* Resources Column */}
           <div>
             <h4 className="font-bold mb-6 text-xs uppercase tracking-widest text-surface-1">Resources</h4>
             <ul className="space-y-4 text-text-sub">
-              <li><a href="#" className="hover:text-primary transition-colors">Docs</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Registry</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Examples</a></li>
+              <li><a href="#/docs" className="hover:text-primary transition-colors">Docs</a></li>
+              <li><a href="https://github.com/GluonGrid/agmd/releases" target="_blank" rel="noreferrer" className="hover:text-primary transition-colors">Changelog</a></li>
             </ul>
           </div>
 
@@ -41,20 +32,14 @@ export const Footer: React.FC = () => {
           <div>
             <h4 className="font-bold mb-6 text-xs uppercase tracking-widest text-surface-1">Community</h4>
             <ul className="space-y-4 text-text-sub">
-              <li><a href="#" className="hover:text-primary transition-colors">GitHub</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">Discord</a></li>
-              <li><a href="#" className="hover:text-primary transition-colors">X / Twitter</a></li>
+              <li><a href="https://github.com/GluonGrid/agmd" target="_blank" rel="noreferrer" className="hover:text-primary transition-colors">GitHub</a></li>
             </ul>
           </div>
         </div>
 
         {/* Bottom Bar */}
         <div className="pt-8 border-t border-border-color flex flex-col md:flex-row justify-between items-center gap-4 text-text-sub text-xs">
-          <p>© 2024 agmd.sh • Built for AI Engineers</p>
-          <div className="flex gap-6">
-            <a href="#" className="hover:text-primary transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-primary transition-colors">Terms of Service</a>
-          </div>
+          <p>© 2026 gluongrid.dev/agmd • Built for AI Engineers</p>
         </div>
       </div>
     </footer>

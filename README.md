@@ -58,7 +58,7 @@ Run `agmd sync` and it expands to a full `AGENTS.md` with all the content.
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/GluonGrid/agmd/main/install.sh | bash
+curl -fsSL https://gluongrid.dev/agmd/install.sh | bash
 
 # Initialize your personal registry
 agmd setup
@@ -272,7 +272,7 @@ Reference with full path:
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GluonGrid/agmd/main/install.sh | bash
+curl -fsSL https://gluongrid.dev/agmd/install.sh | bash
 ```
 
 ### From Source

@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # agmd installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/GluonGrid/agmd/main/install.sh | bash
+# Usage: curl -fsSL https://gluongrid.dev/agmd/install.sh | bash
 #
 
 set -e
