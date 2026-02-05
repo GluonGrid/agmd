@@ -29,6 +29,9 @@ Examples:
   agmd new prompt:code-review
   agmd new profile:svelte-kit
 
+For tasks, use the task subcommand:
+  agmd task new setup-db --content "Set up database"
+
 For AI assistants (non-interactive):
   agmd new rule:test --no-editor
   agmd new rule:test --content "# My Rule\nContent here"
@@ -54,6 +57,11 @@ func runNew(cmd *cobra.Command, args []string) error {
 	}
 	itemType := strings.ToLower(parts[0])
 	name := parts[1]
+
+	// Reject reserved types that have their own subcommands
+	if itemType == "task" {
+		return fmt.Errorf("use 'agmd task new %s' to create tasks", name)
+	}
 
 	reg, err := registry.New()
 	if err != nil {

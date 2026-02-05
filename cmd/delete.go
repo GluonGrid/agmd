@@ -23,6 +23,9 @@ var deleteCmd = &cobra.Command{
 This command removes items from the registry (~/.agmd/) permanently.
 A confirmation prompt will be shown unless --force is used.
 
+For tasks, use the task subcommand:
+  agmd task delete setup-db
+
 Format:
   type:name   - Specify the type and name (e.g., rule:typescript)
 
@@ -54,6 +57,11 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 	itemType := strings.ToLower(parts[0])
 	name := parts[1]
+
+	// Redirect task type
+	if itemType == "task" {
+		return fmt.Errorf("use 'agmd task delete %s' to delete tasks", name)
+	}
 
 	// Load registry
 	reg, err := registry.New()

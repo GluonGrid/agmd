@@ -19,6 +19,9 @@ var showCmd = &cobra.Command{
 
 Useful for AI assistants to read item content without opening an editor.
 
+For tasks, use the task subcommand:
+  agmd task show setup-db
+
 Examples:
   agmd show rule:typescript        # Show rule content
   agmd show workflow:commit        # Show workflow content
@@ -42,6 +45,11 @@ func runShow(cmd *cobra.Command, args []string) error {
 
 	itemType := parts[0]
 	name := parts[1]
+
+	// Redirect task type
+	if itemType == "task" {
+		return fmt.Errorf("use 'agmd task show %s' to show tasks", name)
+	}
 
 	// Load registry
 	reg, err := registry.New()

@@ -147,6 +147,7 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd promote` | Promote `:::new` blocks to registry (required before sync) |
 | `agmd migrate <file>` | Migrate a raw CLAUDE.md/AGENTS.md to agmd format |
 | `agmd collect [-f file]` | Collect rules from an agmd project into your registry |
+| `agmd task <action>` | Manage project tasks (list, new, show, delete, status, ...) |
 
 ## Migrating Existing Projects
 
@@ -300,6 +301,36 @@ agmd works out of the box with sensible defaults:
 3. **Complete output** - `AGENTS.md` has full expanded context for AI
 4. **Personal registry** - Your standards, your way
 5. **Simple syntax** - Learn 3 directives: `:::include`, `:::list`, `:::new`
+
+## Task Management
+
+agmd includes project-based task tracking with dependencies:
+
+```bash
+# Create tasks
+agmd task new setup-db --content "Set up database schema"
+agmd task new create-api --content "Create endpoints" --blocked-by "setup-db"
+agmd task new setup-db --feature auth     # Scope task to a feature
+
+# List tasks (auto-sorted: ready → in_progress → blocked → completed)
+agmd task list                            # All tasks for current project
+agmd task list --feature auth             # Filter by feature
+agmd task list --status ready             # Filter by computed status
+agmd task list --tree                     # Show dependency tree
+agmd task list --all                      # Include completed tasks
+
+# Manage status and dependencies
+agmd task status setup-db completed       # Update status
+agmd task blocked-by create-api setup-db  # Add dependency
+agmd task unblock create-api setup-db     # Remove dependency
+
+# View and delete
+agmd task show setup-db                   # Show task content
+agmd task show --all                      # Show all tasks with content
+agmd task delete setup-db --force         # Delete task
+```
+
+Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by dependency status. Use `--feature` to scope tasks to specific features or sessions within a project. The `--status` flag filters by computed status (`ready`, `blocked`, `in_progress`, `completed`), and `--tree` visualizes dependency chains. Dependencies passed via `--blocked-by` are validated to ensure they exist.
 
 ## AI Assistant Integration
 

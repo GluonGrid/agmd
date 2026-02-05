@@ -71,7 +71,28 @@ echo "Content" | agmd edit type:name
 # Other commands
 agmd sync                        # Generate AGENTS.md from directives.md
 agmd list                        # List all registry items
+agmd ls                          # Alias for list
 agmd promote --all               # Promote all :::new blocks to registry
+` + "```" + `
+
+### Task Management
+
+` + "```" + `bash
+# All task operations use: agmd task <action>
+agmd task list                                   # List tasks (auto-sorted)
+agmd task list --feature auth                    # Filter by feature
+agmd task list --status ready                    # Filter by status (ready/blocked/in_progress/completed)
+agmd task list --tree                            # Show dependency tree
+agmd task list --all                             # Include completed tasks
+agmd task new setup-db --content "Description"   # Create task
+agmd task new setup-db --feature auth            # Scoped to feature
+agmd task new api --blocked-by "setup-db"        # With dependency (validated)
+agmd task show setup-db                          # Show single task
+agmd task show --all                             # Show all tasks
+agmd task delete setup-db --force                # Delete task
+agmd task status setup-db completed              # Update status
+agmd task blocked-by api setup-db                # Add dependency
+agmd task unblock api setup-db                   # Remove dependency
 ` + "```" + `
 
 ### Important
@@ -80,5 +101,6 @@ agmd promote --all               # Promote all :::new blocks to registry
 - Run ` + "`agmd sync`" + ` after changes to regenerate AGENTS.md
 - Use ` + "`:::new`" + ` for project-specific content, then ` + "`agmd promote`" + ` to reuse elsewhere
 - Types are flexible: use rule, workflow, prompt, guide, or any custom type
+- Reserved types (task, doc, file) use resource-first subcommands (e.g., ` + "`agmd task list`" + `)
 `
 }

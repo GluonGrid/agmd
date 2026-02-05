@@ -16,12 +16,17 @@ import (
 var listTree bool
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all registry items",
+	Use:     "list [type]",
+	Aliases: []string{"ls"},
+	Short:   "List all registry items",
 	Long: `List all items in the registry organized by type.
+
+For tasks, use the task subcommand:
+  agmd task list
 
 Examples:
   agmd list           # List all items
+  agmd ls             # Same (alias)
   agmd list --tree    # Show as ASCII tree`,
 	RunE: runList,
 }
@@ -42,6 +47,12 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	if !reg.Exists() {
 		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
+	}
+
+	// Hint for task type
+	if len(args) > 0 && args[0] == "task" {
+		fmt.Printf("Use 'agmd task list' to list tasks\n")
+		return nil
 	}
 
 	// Tree view
@@ -66,6 +77,11 @@ func runList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s\n\n", cyan(reg.BasePath))
 
 	for _, typeName := range types {
+		// Skip task type in general listing (it has its own subcommand)
+		if typeName == "task" {
+			continue
+		}
+
 		items, err := reg.ListItems(typeName)
 		if err != nil || len(items) == 0 {
 			continue
