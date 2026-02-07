@@ -493,9 +493,7 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		}
 
 		status := computeTaskStatus(t, taskMap)
-		if status == StatusCompleted && !showAll {
-			return
-		}
+		// In tree view, always show completed tasks - they're needed to understand the dependency chain
 
 		// Status indicator
 		var indicator string
