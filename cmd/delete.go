@@ -79,7 +79,13 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("type '%s' does not exist in registry", itemType)
 	}
 
-	itemPath := filepath.Join(basePath, name+".md")
+	// Raw types (file:) don't use .md extension
+	var itemPath string
+	if registry.IsRawType(itemType) {
+		itemPath = filepath.Join(basePath, name)
+	} else {
+		itemPath = filepath.Join(basePath, name+".md")
+	}
 
 	// Check if item exists
 	if _, err := os.Stat(itemPath); os.IsNotExist(err) {

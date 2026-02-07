@@ -36,7 +36,13 @@ func (r *Registry) Exists() bool {
 
 // GetItem retrieves an item by type and name
 func (r *Registry) GetItem(itemType, name string) (*Item, error) {
-	path := filepath.Join(r.BasePath, itemType, name+".md")
+	var path string
+	if IsRawType(itemType) {
+		// Raw types (file:) don't have .md extension
+		path = filepath.Join(r.BasePath, itemType, name)
+	} else {
+		path = filepath.Join(r.BasePath, itemType, name+".md")
+	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("%s '%s' not found", itemType, name)
@@ -53,14 +59,22 @@ func (r *Registry) SaveItem(item Item) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	path := filepath.Join(typeDir, item.Name+".md")
+	var path string
+	var content string
 
-	content := fmt.Sprintf(`---
+	if IsRawType(item.Type) {
+		// Raw types (file:) store content as-is without .md extension or frontmatter
+		path = filepath.Join(typeDir, item.Name)
+		content = item.Content
+	} else {
+		path = filepath.Join(typeDir, item.Name+".md")
+		content = fmt.Sprintf(`---
 name: %s
 description: %s
 ---
 
 %s`, item.Name, item.Description, item.Content)
+	}
 
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
@@ -105,7 +119,12 @@ func (r *Registry) loadItems(dir, itemType string) ([]Item, error) {
 
 	var items []Item
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		if entry.IsDir() {
+			continue
+		}
+
+		// Raw types (file:) include all files; other types only .md files
+		if !IsRawType(itemType) && !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
 

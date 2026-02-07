@@ -23,13 +23,22 @@ func loadItem(path string, itemType string) (*Item, error) {
 		return nil, err
 	}
 
-	// Get name from filename
-	name := strings.TrimSuffix(filepath.Base(path), ".md")
+	// Get name from filename (strip .md for regular types, keep full name for raw types)
+	name := filepath.Base(path)
+	if !IsRawType(itemType) {
+		name = strings.TrimSuffix(name, ".md")
+	}
 
 	item := &Item{
 		Type:     itemType,
 		Name:     name,
 		FilePath: path,
+	}
+
+	// Raw types (file:) store content as-is without frontmatter
+	if IsRawType(itemType) {
+		item.Content = string(content)
+		return item, nil
 	}
 
 	frontmatter, markdown, err := extractFrontmatter(content)

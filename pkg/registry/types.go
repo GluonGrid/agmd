@@ -21,3 +21,8 @@ type Profile struct {
 type Registry struct {
 	BasePath string // ~/.agmd
 }
+
+// IsRawType returns true for types that store files without .md extension and frontmatter
+func IsRawType(itemType string) bool {
+	return itemType == "file"
+}
