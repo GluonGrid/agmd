@@ -83,6 +83,14 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	itemType := strings.ToLower(parts[0])
 	name := parts[1]
 
+	// Redirect reserved types
+	if itemType == "task" {
+		return fmt.Errorf("use 'agmd task show %s' then edit manually, or update via 'agmd task status'", name)
+	}
+	if itemType == "doc" {
+		return fmt.Errorf("use 'agmd doc edit %s' to edit docs (not yet implemented)", name)
+	}
+
 	// Load registry
 	reg, err := registry.New()
 	if err != nil {

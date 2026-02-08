@@ -59,9 +59,12 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	itemType := strings.ToLower(parts[0])
 	name := parts[1]
 
-	// Redirect task type
+	// Redirect reserved types
 	if itemType == "task" {
 		return fmt.Errorf("use 'agmd task delete %s' to delete tasks", name)
+	}
+	if itemType == "doc" {
+		return fmt.Errorf("use 'agmd doc delete %s' to delete docs (not yet implemented)", name)
 	}
 
 	// Load registry

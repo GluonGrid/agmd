@@ -28,7 +28,8 @@ Run 'agmd sync' to create AGENTS.md from directives.md.
 Examples:
   agmd init                    # Initialize with default profile
   agmd init profile:svelte-kit # Initialize with svelte-kit profile`,
-	RunE: runInit,
+	ValidArgsFunction: completeProfileName,
+	RunE:              runInit,
 }
 
 func init() {

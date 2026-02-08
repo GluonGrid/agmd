@@ -62,6 +62,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 	if itemType == "task" {
 		return fmt.Errorf("use 'agmd task new %s' to create tasks", name)
 	}
+	if itemType == "doc" {
+		return fmt.Errorf("use 'agmd doc new %s' to create docs (not yet implemented)", name)
+	}
 
 	// Check for raw file types
 	isRawType := registry.IsRawType(itemType)

@@ -52,9 +52,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
-	// Hint for task type
+	// Hint for reserved types
 	if len(args) > 0 && args[0] == "task" {
 		fmt.Printf("Use 'agmd task list' to list tasks\n")
+		return nil
+	}
+	if len(args) > 0 && args[0] == "doc" {
+		fmt.Printf("Use 'agmd doc list' to list docs (not yet implemented)\n")
 		return nil
 	}
 
@@ -100,8 +104,8 @@ func runList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s\n\n", cyan(reg.BasePath))
 
 	for _, typeName := range types {
-		// Skip task type in general listing (it has its own subcommand)
-		if typeName == "task" {
+		// Skip reserved types in general listing (they have their own subcommands)
+		if typeName == "task" || typeName == "doc" {
 			continue
 		}
 

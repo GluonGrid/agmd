@@ -26,8 +26,9 @@ Examples:
   agmd mv rule:typescript frontend/typescript    # Move to subfolder
   agmd mv rule:old-name new-name                 # Rename
   agmd mv workflow:test frontend/test            # Move to subfolder`,
-	Args: cobra.ExactArgs(2),
-	RunE: runMv,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeTypeName,
+	RunE:              runMv,
 }
 
 func init() {
@@ -71,10 +72,22 @@ func runMv(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
 	}
 
-	// Get source path
-	sourceBasePath := reg.TypePath(sourceType)
+	// Reject reserved types that have their own subcommands
+	if sourceType == "task" || sourceType == "doc" {
+		return fmt.Errorf("cannot move %s type items with 'agmd mv'", sourceType)
+	}
+	if destType == "task" || destType == "doc" {
+		return fmt.Errorf("cannot move items to %s type with 'agmd mv'", destType)
+	}
 
-	sourcePath := filepath.Join(sourceBasePath, sourceName+".md")
+	// Get source path (raw types don't use .md extension)
+	sourceBasePath := reg.TypePath(sourceType)
+	var sourcePath string
+	if registry.IsRawType(sourceType) {
+		sourcePath = filepath.Join(sourceBasePath, sourceName)
+	} else {
+		sourcePath = filepath.Join(sourceBasePath, sourceName+".md")
+	}
 
 	// Check if source exists
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
@@ -101,7 +114,13 @@ func runMv(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Created new type: %s\n", green("✓"), destType)
 	}
 
-	destPath := filepath.Join(destBasePath, destName+".md")
+	// Raw types don't use .md extension
+	var destPath string
+	if registry.IsRawType(destType) {
+		destPath = filepath.Join(destBasePath, destName)
+	} else {
+		destPath = filepath.Join(destBasePath, destName+".md")
+	}
 	destDir := filepath.Dir(destPath)
 
 	// Create destination subdirectories if needed

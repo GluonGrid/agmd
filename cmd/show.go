@@ -47,9 +47,12 @@ func runShow(cmd *cobra.Command, args []string) error {
 	itemType := parts[0]
 	name := parts[1]
 
-	// Redirect task type
+	// Redirect reserved types
 	if itemType == "task" {
 		return fmt.Errorf("use 'agmd task show %s' to show tasks", name)
+	}
+	if itemType == "doc" {
+		return fmt.Errorf("use 'agmd doc show %s' to show docs (not yet implemented)", name)
 	}
 
 	// Load registry
