@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"agmd/pkg/registry"
@@ -71,14 +72,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	var templateContent string
+	var profile *registry.Profile
 
 	// Use profile if specified
 	if profileName != "" {
-		profile, err := reg.GetProfile(profileName)
+		p, err := reg.GetProfile(profileName)
 		if err != nil {
 			return fmt.Errorf("profile '%s' not found\nRun 'agmd list' to see available profiles", profileName)
 		}
-
+		profile = p
 		templateContent = profile.Content
 		fmt.Printf("%s Using profile: %s\n", green("✓"), profileName)
 		if profile.Description != "" {
@@ -89,10 +91,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 		defaultProfile, err := reg.GetProfile("default")
 		if err == nil {
 			// Default profile exists, use it
-			templateContent = defaultProfile.Content
+			profile = defaultProfile
+			templateContent = profile.Content
 			fmt.Printf("%s Using default profile\n", green("✓"))
-			if defaultProfile.Description != "" {
-				fmt.Printf("  %s\n", defaultProfile.Description)
+			if profile.Description != "" {
+				fmt.Printf("  %s\n", profile.Description)
 			}
 		} else {
 			// Fallback: No default profile found (shouldn't happen after setup)
@@ -110,9 +113,58 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Created directives.md\n", green("✓"))
 
+	// Copy files from profile if any
+	var copiedFiles []string
+	if profile != nil && len(profile.Files) > 0 {
+		fmt.Printf("%s Copying profile files...\n", blue("→"))
+		for _, pf := range profile.Files {
+			srcPath := filepath.Join(reg.BasePath, "file", pf.Source)
+			destPath := pf.Destination
+
+			// Check if source file exists
+			if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+				fmt.Printf("  %s file:%s not found, skipping\n", red("✗"), pf.Source)
+				continue
+			}
+
+			// Check if destination already exists
+			if _, err := os.Stat(destPath); err == nil {
+				fmt.Printf("  %s %s already exists, skipping\n", blue("ℹ"), destPath)
+				continue
+			}
+
+			// Create destination directory if needed
+			destDir := filepath.Dir(destPath)
+			if destDir != "." && destDir != "" {
+				if err := os.MkdirAll(destDir, 0755); err != nil {
+					fmt.Printf("  %s failed to create directory %s: %v\n", red("✗"), destDir, err)
+					continue
+				}
+			}
+
+			// Copy the file
+			content, err := os.ReadFile(srcPath)
+			if err != nil {
+				fmt.Printf("  %s failed to read file:%s: %v\n", red("✗"), pf.Source, err)
+				continue
+			}
+
+			if err := os.WriteFile(destPath, content, 0644); err != nil {
+				fmt.Printf("  %s failed to write %s: %v\n", red("✗"), destPath, err)
+				continue
+			}
+
+			fmt.Printf("  %s Copied file:%s → %s\n", green("✓"), pf.Source, destPath)
+			copiedFiles = append(copiedFiles, destPath)
+		}
+	}
+
 	fmt.Printf("\n%s Project initialized successfully!\n", green("✓"))
 	fmt.Println("\nCreated:")
 	fmt.Printf("  • %s - Source file with directives (edit this)\n", directivesMdFilename)
+	for _, f := range copiedFiles {
+		fmt.Printf("  • %s\n", f)
+	}
 
 	fmt.Println("\nNext steps:")
 	fmt.Println("  • Edit directives.md to add directives")

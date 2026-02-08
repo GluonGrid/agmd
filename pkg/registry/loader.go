@@ -16,6 +16,13 @@ type ItemMeta struct {
 	Description string `yaml:"description,omitempty"`
 }
 
+// ProfileMeta represents the YAML frontmatter for a profile
+type ProfileMeta struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description,omitempty"`
+	Files       []string `yaml:"files,omitempty"` // e.g., ["file:setup.sh > setup.sh", "file:config.json"]
+}
+
 // loadItem loads a single item from a file
 func loadItem(path string, itemType string) (*Item, error) {
 	content, err := os.ReadFile(path)
@@ -93,28 +100,67 @@ func loadProfile(path string) (*Profile, error) {
 	}
 
 	profile := &Profile{
-		FilePath: path,
-		Name:     strings.TrimSuffix(filepath.Base(path), ".md"),
+		FilePath:   path,
+		Name:       strings.TrimSuffix(filepath.Base(path), ".md"),
+		RawContent: string(content),
 	}
 
 	// Extract frontmatter if present
-	frontmatter, _, err := extractFrontmatter(content)
+	frontmatter, markdown, err := extractFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(frontmatter) > 0 {
-		var meta ItemMeta
+		var meta ProfileMeta
 		if err := yaml.Unmarshal(frontmatter, &meta); err != nil {
 			return nil, fmt.Errorf("invalid frontmatter: %w", err)
 		}
 		profile.Description = meta.Description
+
+		// Parse files field
+		for _, fileSpec := range meta.Files {
+			pf := parseProfileFile(fileSpec)
+			if pf != nil {
+				profile.Files = append(profile.Files, *pf)
+			}
+		}
 	}
 
-	// Store the full content (with frontmatter)
-	profile.Content = string(content)
+	// Store content below frontmatter
+	profile.Content = string(markdown)
 
 	return profile, nil
+}
+
+// parseProfileFile parses a file spec like "file:name" or "file:name > dest"
+func parseProfileFile(spec string) *ProfileFile {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+
+	// Check for redirect syntax: "file:name > destination"
+	if strings.Contains(spec, ">") {
+		parts := strings.SplitN(spec, ">", 2)
+		source := strings.TrimSpace(parts[0])
+		dest := strings.TrimSpace(parts[1])
+
+		// Extract file name from source (remove file: prefix if present)
+		source = strings.TrimPrefix(source, "file:")
+
+		return &ProfileFile{
+			Source:      source,
+			Destination: dest,
+		}
+	}
+
+	// Simple syntax: "file:name" - destination is same as source name
+	source := strings.TrimPrefix(spec, "file:")
+	return &ProfileFile{
+		Source:      source,
+		Destination: source,
+	}
 }
 
 // saveProfile saves a profile to a markdown file

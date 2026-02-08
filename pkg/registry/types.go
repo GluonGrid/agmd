@@ -9,11 +9,19 @@ type Item struct {
 	FilePath    string // Path to the .md file
 }
 
+// ProfileFile represents a file to copy when initializing with a profile
+type ProfileFile struct {
+	Source      string // file:name reference in registry
+	Destination string // destination path in project (optional, defaults to source name)
+}
+
 // Profile represents a directives.md template
 type Profile struct {
 	Name        string
 	Description string
-	Content     string // Full directives.md template content
+	Files       []ProfileFile // Files to copy on init
+	Content     string        // Full directives.md template content (below frontmatter)
+	RawContent  string        // Full content including frontmatter
 	FilePath    string
 }
 
