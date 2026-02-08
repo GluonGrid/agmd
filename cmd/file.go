@@ -28,13 +28,16 @@ Use this for scripts, config files, or any non-markdown content.
 
 Subcommands:
   list        List all files
-  new         Add a new file
+  new         Create a new file
+  add         Add an existing file to registry
   show        Show file content
   delete      Delete a file
 
 Examples:
   agmd file list                                  # List all files
   agmd file new setup.sh --content "#!/bin/bash" # Create file
+  agmd file add ./scripts/deploy.sh              # Add existing file
+  agmd file add ./config.json settings.json      # Add with new name
   agmd file show setup.sh                         # Show file content
   agmd file delete setup.sh                       # Delete file`,
 }
@@ -81,6 +84,21 @@ Examples:
 	RunE:              runFileShow,
 }
 
+var fileAddCmd = &cobra.Command{
+	Use:   "add <path> [name]",
+	Short: "Add an existing file to the registry",
+	Long: `Copy an existing file into the registry.
+
+If no name is provided, the file's basename is used.
+
+Examples:
+  agmd file add ./scripts/setup.sh              # Add as setup.sh
+  agmd file add ./scripts/setup.sh deploy.sh    # Add as deploy.sh
+  agmd file add /path/to/config.json            # Add as config.json`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runFileAdd,
+}
+
 var fileDeleteCmd = &cobra.Command{
 	Use:     "delete <name>",
 	Aliases: []string{"del", "rm"},
@@ -100,11 +118,14 @@ func init() {
 	rootCmd.AddCommand(fileCmd)
 	fileCmd.AddCommand(fileListCmd)
 	fileCmd.AddCommand(fileNewCmd)
+	fileCmd.AddCommand(fileAddCmd)
 	fileCmd.AddCommand(fileShowCmd)
 	fileCmd.AddCommand(fileDeleteCmd)
 
 	fileNewCmd.Flags().StringVar(&fileContent, "content", "", "File content")
 	fileNewCmd.Flags().BoolVar(&fileNoEditor, "no-editor", false, "Don't open editor after creating")
+
+	fileAddCmd.Flags().BoolVarP(&fileForce, "force", "f", false, "Overwrite if file exists")
 
 	fileDeleteCmd.Flags().BoolVarP(&fileForce, "force", "f", false, "Skip confirmation prompt")
 }
@@ -249,6 +270,74 @@ func runFileNew(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Opening editor...\n", blue("->"))
 	return openInEditor(filePath)
+}
+
+func runFileAdd(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+	blue := color.New(color.FgBlue).SprintFunc()
+
+	sourcePath := args[0]
+
+	// Determine destination name
+	var destName string
+	if len(args) > 1 {
+		destName = args[1]
+	} else {
+		destName = filepath.Base(sourcePath)
+	}
+
+	// Check source exists
+	sourceInfo, err := os.Stat(sourcePath)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("source file not found: %s", sourcePath)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to access source file: %w", err)
+	}
+	if sourceInfo.IsDir() {
+		return fmt.Errorf("source is a directory, not a file: %s", sourcePath)
+	}
+
+	reg, err := registry.New()
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+
+	if !reg.Exists() {
+		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
+	}
+
+	// Build destination path
+	fileDir := filepath.Join(reg.BasePath, "file")
+	destPath := filepath.Join(fileDir, destName)
+
+	// Check if destination exists
+	if _, err := os.Stat(destPath); err == nil {
+		if !fileForce {
+			return fmt.Errorf("file:%s already exists (use --force to overwrite)", destName)
+		}
+	}
+
+	// Create directory
+	if err := os.MkdirAll(fileDir, 0755); err != nil {
+		return fmt.Errorf("failed to create file directory: %w", err)
+	}
+
+	// Read source file
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to read source file: %w", err)
+	}
+
+	// Write to destination
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	fmt.Printf("%s Added file:%s (%d bytes)\n", green("ok"), destName, len(content))
+	fmt.Printf("%s %s\n", blue("->"), destPath)
+
+	return nil
 }
 
 func runFileShow(cmd *cobra.Command, args []string) error {
