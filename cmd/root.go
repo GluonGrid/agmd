@@ -51,5 +51,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.CompletionOptions.DisableDefaultCmd = true
+	// Enable shell completion command (agmd completion bash/zsh/fish/powershell)
 }

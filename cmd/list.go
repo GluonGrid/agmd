@@ -26,9 +26,12 @@ For tasks, use the task subcommand:
 
 Examples:
   agmd list           # List all items
+  agmd list rule      # List only rules
+  agmd list file      # List only files
   agmd ls             # Same (alias)
   agmd list --tree    # Show as ASCII tree`,
-	RunE: runList,
+	ValidArgsFunction: completeTypeOnly,
+	RunE:              runList,
 }
 
 func init() {
@@ -60,6 +63,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		return runListTree(reg)
 	}
 
+	// Filter by specific type if provided
+	var filterType string
+	if len(args) > 0 {
+		filterType = strings.ToLower(args[0])
+	}
+
 	// List by type
 	types, err := reg.ListTypes()
 	if err != nil {
@@ -74,11 +83,30 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// If filtering by type, check it exists
+	if filterType != "" {
+		found := false
+		for _, t := range types {
+			if t == filterType {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("type '%s' not found in registry", filterType)
+		}
+	}
+
 	fmt.Printf("%s\n\n", cyan(reg.BasePath))
 
 	for _, typeName := range types {
 		// Skip task type in general listing (it has its own subcommand)
 		if typeName == "task" {
+			continue
+		}
+
+		// Filter by type if specified
+		if filterType != "" && typeName != filterType {
 			continue
 		}
 

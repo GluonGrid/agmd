@@ -34,8 +34,9 @@ Examples:
   agmd rm workflow:old-workflow          # Delete a workflow (using alias)
   agmd del prompt:deprecated             # Delete a prompt (using alias)
   agmd delete rule:frontend/old --force  # Delete without confirmation`,
-	Args: cobra.ExactArgs(1),
-	RunE: runDelete,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTypeName,
+	RunE:              runDelete,
 }
 
 func init() {

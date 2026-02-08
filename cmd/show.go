@@ -13,8 +13,8 @@ import (
 var showRaw bool
 
 var showCmd = &cobra.Command{
-	Use:   "show <type:name>",
-	Short: "Show the content of a registry item",
+	Use:               "show <type:name>",
+	Short:             "Show the content of a registry item",
 	Long: `Display the content of a registry item (like cat).
 
 Useful for AI assistants to read item content without opening an editor.
@@ -27,8 +27,9 @@ Examples:
   agmd show workflow:commit        # Show workflow content
   agmd show guide:agmd             # Show guide content
   agmd show rule:typescript --raw  # Include frontmatter`,
-	Args: cobra.ExactArgs(1),
-	RunE: runShow,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTypeName,
+	RunE:              runShow,
 }
 
 func init() {

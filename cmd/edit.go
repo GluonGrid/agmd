@@ -33,7 +33,8 @@ Examples:
 For AI assistants (non-interactive):
   agmd edit rule:test --content "# Updated content"
   echo "New content" | agmd edit rule:test`,
-	RunE: runEdit,
+	ValidArgsFunction: completeTypeName,
+	RunE:              runEdit,
 }
 
 func init() {

@@ -128,7 +128,8 @@ Examples:
   agmd task show --all                          # Show all tasks for project
   agmd task show --all --feature auth           # Show all tasks for feature
   agmd task show --all --project myproj         # Show all tasks for specific project`,
-	RunE: runTaskShow,
+	ValidArgsFunction: completeTaskName,
+	RunE:              runTaskShow,
 }
 
 var taskDeleteCmd = &cobra.Command{
@@ -142,8 +143,9 @@ Examples:
   agmd task rm setup-db                 # Same (alias)
   agmd task delete setup-db --force     # Skip confirmation
   agmd task delete setup-db --project x # Delete from specific project`,
-	Args: cobra.ExactArgs(1),
-	RunE: runTaskDelete,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTaskName,
+	RunE:              runTaskDelete,
 }
 
 var taskStatusCmd = &cobra.Command{
@@ -157,8 +159,9 @@ Examples:
   agmd task status setup-db pending
   agmd task status setup-db in_progress
   agmd task status setup-db completed`,
-	Args: cobra.ExactArgs(2),
-	RunE: runTaskStatus,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeTaskStatus,
+	RunE:              runTaskStatus,
 }
 
 var taskBlockedByCmd = &cobra.Command{
@@ -170,8 +173,9 @@ This makes <task-name> depend on <dependency>.
 
 Examples:
   agmd task blocked-by create-api setup-db    # create-api depends on setup-db`,
-	Args: cobra.ExactArgs(2),
-	RunE: runTaskBlockedBy,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeTaskDependency,
+	RunE:              runTaskBlockedBy,
 }
 
 var taskUnblockCmd = &cobra.Command{
@@ -181,8 +185,9 @@ var taskUnblockCmd = &cobra.Command{
 
 Examples:
   agmd task unblock create-api setup-db    # Remove setup-db dependency from create-api`,
-	Args: cobra.ExactArgs(2),
-	RunE: runTaskUnblock,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeTaskDependency,
+	RunE:              runTaskUnblock,
 }
 
 func init() {
@@ -200,6 +205,7 @@ func init() {
 	taskListCmd.Flags().StringVar(&taskFeature, "feature", "", "Filter tasks by feature")
 	taskListCmd.Flags().BoolVarP(&taskAll, "all", "a", false, "Include completed tasks")
 	taskListCmd.Flags().StringVar(&taskStatus, "status", "", "Filter by computed status (ready, blocked, in_progress, completed)")
+	taskListCmd.RegisterFlagCompletionFunc("status", completeListStatusFlag)
 	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization")
 
 	taskNewCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
