@@ -65,9 +65,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 	if itemType == "doc" {
 		return fmt.Errorf("use 'agmd doc new %s' to create docs (not yet implemented)", name)
 	}
-
-	// Check for raw file types
-	isRawType := registry.IsRawType(itemType)
+	if itemType == "file" {
+		return fmt.Errorf("use 'agmd file new %s' to create files", name)
+	}
 
 	reg, err := registry.New()
 	if err != nil {
@@ -83,13 +83,8 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return createProfile(name, reg)
 	}
 
-	// Build path (raw types don't use .md extension)
-	var filePath string
-	if isRawType {
-		filePath = filepath.Join(reg.BasePath, itemType, name)
-	} else {
-		filePath = filepath.Join(reg.BasePath, itemType, name+".md")
-	}
+	// Build path
+	filePath := filepath.Join(reg.BasePath, itemType, name+".md")
 
 	// Check if exists
 	if _, err := os.Stat(filePath); err == nil {
@@ -116,16 +111,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 		content = string(stdinContent)
 	}
 
-	// Build file content
+	// Build file content with frontmatter
 	var fileContent string
-	if isRawType {
-		// Raw types (file:) store content as-is without frontmatter
-		if content != "" {
-			fileContent = content
-		} else {
-			fileContent = ""
-		}
-	} else if content != "" {
+	if content != "" {
 		// Use provided content with frontmatter
 		fileContent = fmt.Sprintf(`---
 name: %s

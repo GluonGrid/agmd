@@ -73,21 +73,16 @@ func runMv(cmd *cobra.Command, args []string) error {
 	}
 
 	// Reject reserved types that have their own subcommands
-	if sourceType == "task" || sourceType == "doc" {
+	if sourceType == "task" || sourceType == "doc" || sourceType == "file" {
 		return fmt.Errorf("cannot move %s type items with 'agmd mv'", sourceType)
 	}
-	if destType == "task" || destType == "doc" {
+	if destType == "task" || destType == "doc" || destType == "file" {
 		return fmt.Errorf("cannot move items to %s type with 'agmd mv'", destType)
 	}
 
-	// Get source path (raw types don't use .md extension)
+	// Get source path
 	sourceBasePath := reg.TypePath(sourceType)
-	var sourcePath string
-	if registry.IsRawType(sourceType) {
-		sourcePath = filepath.Join(sourceBasePath, sourceName)
-	} else {
-		sourcePath = filepath.Join(sourceBasePath, sourceName+".md")
-	}
+	sourcePath := filepath.Join(sourceBasePath, sourceName+".md")
 
 	// Check if source exists
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
@@ -114,13 +109,7 @@ func runMv(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Created new type: %s\n", green("✓"), destType)
 	}
 
-	// Raw types don't use .md extension
-	var destPath string
-	if registry.IsRawType(destType) {
-		destPath = filepath.Join(destBasePath, destName)
-	} else {
-		destPath = filepath.Join(destBasePath, destName+".md")
-	}
+	destPath := filepath.Join(destBasePath, destName+".md")
 	destDir := filepath.Dir(destPath)
 
 	// Create destination subdirectories if needed

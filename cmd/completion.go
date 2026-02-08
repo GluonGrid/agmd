@@ -53,7 +53,7 @@ func completeTypeName(cmd *cobra.Command, args []string, toComplete string) ([]s
 	var completions []string
 	for _, t := range types {
 		// Skip reserved types (they have their own subcommands)
-		if t == "task" || t == "doc" {
+		if t == "task" || t == "doc" || t == "file" {
 			continue
 		}
 		if strings.HasPrefix(t, toComplete) {
@@ -85,7 +85,7 @@ func completeTypeOnly(cmd *cobra.Command, args []string, toComplete string) ([]s
 	var completions []string
 	for _, t := range types {
 		// Skip reserved types (they have their own subcommands)
-		if t == "task" || t == "doc" {
+		if t == "task" || t == "doc" || t == "file" {
 			continue
 		}
 		if strings.HasPrefix(t, toComplete) {

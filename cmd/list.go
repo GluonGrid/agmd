@@ -27,9 +27,12 @@ For tasks, use the task subcommand:
 Examples:
   agmd list           # List all items
   agmd list rule      # List only rules
-  agmd list file      # List only files
   agmd ls             # Same (alias)
-  agmd list --tree    # Show as ASCII tree`,
+  agmd list --tree    # Show as ASCII tree
+
+For files, tasks, and docs use their subcommands:
+  agmd file list
+  agmd task list`,
 	ValidArgsFunction: completeTypeOnly,
 	RunE:              runList,
 }
@@ -59,6 +62,10 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	if len(args) > 0 && args[0] == "doc" {
 		fmt.Printf("Use 'agmd doc list' to list docs (not yet implemented)\n")
+		return nil
+	}
+	if len(args) > 0 && args[0] == "file" {
+		fmt.Printf("Use 'agmd file list' to list files\n")
 		return nil
 	}
 
@@ -105,7 +112,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	for _, typeName := range types {
 		// Skip reserved types in general listing (they have their own subcommands)
-		if typeName == "task" || typeName == "doc" {
+		if typeName == "task" || typeName == "doc" || typeName == "file" {
 			continue
 		}
 

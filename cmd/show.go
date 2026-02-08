@@ -54,6 +54,9 @@ func runShow(cmd *cobra.Command, args []string) error {
 	if itemType == "doc" {
 		return fmt.Errorf("use 'agmd doc show %s' to show docs (not yet implemented)", name)
 	}
+	if itemType == "file" {
+		return fmt.Errorf("use 'agmd file show %s' to show files", name)
+	}
 
 	// Load registry
 	reg, err := registry.New()

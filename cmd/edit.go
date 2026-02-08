@@ -90,6 +90,9 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	if itemType == "doc" {
 		return fmt.Errorf("use 'agmd doc edit %s' to edit docs (not yet implemented)", name)
 	}
+	if itemType == "file" {
+		return fmt.Errorf("use 'agmd file show %s' to view, then edit with your editor", name)
+	}
 
 	// Load registry
 	reg, err := registry.New()
@@ -97,13 +100,8 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	// Build file path (raw types don't use .md extension)
-	var filePath string
-	if registry.IsRawType(itemType) {
-		filePath = filepath.Join(reg.BasePath, itemType, name)
-	} else {
-		filePath = filepath.Join(reg.BasePath, itemType, name+".md")
-	}
+	// Build file path
+	filePath := filepath.Join(reg.BasePath, itemType, name+".md")
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -112,32 +110,25 @@ func runEdit(cmd *cobra.Command, args []string) error {
 
 	// Non-interactive edit
 	if newContent != "" {
-		if registry.IsRawType(itemType) {
-			// Raw types: replace content as-is (no frontmatter)
-			if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
-				return fmt.Errorf("failed to write file: %w", err)
-			}
+		// Preserve frontmatter, replace content
+		existingContent, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+
+		// Extract frontmatter
+		frontmatter := extractFrontmatterString(string(existingContent))
+
+		var updatedContent string
+		if frontmatter != "" {
+			updatedContent = frontmatter + "\n" + strings.TrimSpace(newContent)
 		} else {
-			// Preserve frontmatter, replace content
-			existingContent, err := os.ReadFile(filePath)
-			if err != nil {
-				return fmt.Errorf("failed to read file: %w", err)
-			}
+			// Add default frontmatter
+			updatedContent = fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n%s", name, strings.TrimSpace(newContent))
+		}
 
-			// Extract frontmatter
-			frontmatter := extractFrontmatterString(string(existingContent))
-
-			var updatedContent string
-			if frontmatter != "" {
-				updatedContent = frontmatter + "\n" + strings.TrimSpace(newContent)
-			} else {
-				// Add default frontmatter
-				updatedContent = fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n%s", name, strings.TrimSpace(newContent))
-			}
-
-			if err := os.WriteFile(filePath, []byte(updatedContent), 0644); err != nil {
-				return fmt.Errorf("failed to write file: %w", err)
-			}
+		if err := os.WriteFile(filePath, []byte(updatedContent), 0644); err != nil {
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 		fmt.Printf("%s Updated %s:%s\n", green("ok"), itemType, name)
 		return nil

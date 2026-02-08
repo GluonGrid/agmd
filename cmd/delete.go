@@ -66,6 +66,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if itemType == "doc" {
 		return fmt.Errorf("use 'agmd doc delete %s' to delete docs (not yet implemented)", name)
 	}
+	if itemType == "file" {
+		return fmt.Errorf("use 'agmd file delete %s' to delete files", name)
+	}
 
 	// Load registry
 	reg, err := registry.New()
@@ -83,13 +86,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("type '%s' does not exist in registry", itemType)
 	}
 
-	// Raw types (file:) don't use .md extension
-	var itemPath string
-	if registry.IsRawType(itemType) {
-		itemPath = filepath.Join(basePath, name)
-	} else {
-		itemPath = filepath.Join(basePath, name+".md")
-	}
+	itemPath := filepath.Join(basePath, name+".md")
 
 	// Check if item exists
 	if _, err := os.Stat(itemPath); os.IsNotExist(err) {
