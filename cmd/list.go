@@ -55,6 +55,22 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
+	// Handle type:name format for doc/file folder listing
+	if len(args) > 0 && strings.Contains(args[0], ":") {
+		parts := strings.SplitN(args[0], ":", 2)
+		itemType := parts[0]
+		name := parts[1]
+
+		if itemType == "doc" {
+			return listDocContents(reg, name)
+		}
+		if itemType == "file" {
+			// file: items are single files, not folders
+			fmt.Printf("Use 'agmd file show %s' to view file contents\n", name)
+			return nil
+		}
+	}
+
 	// Hint for reserved types
 	if len(args) > 0 && args[0] == "task" {
 		fmt.Printf("Use 'agmd task list' to list tasks\n")
@@ -248,4 +264,33 @@ func printTree(nodes []*TreeNode, prefix string, isRoot bool, dim func(a ...inte
 			printTree(node.Children, childPrefix, false, dim)
 		}
 	}
+}
+
+// listDocContents shows the contents of a doc folder
+func listDocContents(reg *registry.Registry, name string) error {
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+
+	docPath := filepath.Join(reg.BasePath, "doc", name)
+	if _, err := os.Stat(docPath); os.IsNotExist(err) {
+		return fmt.Errorf("doc:%s not found", name)
+	}
+
+	fmt.Printf("%s\n\n", cyan(docPath))
+
+	// Build and print tree
+	nodes := buildRegistryTree(docPath)
+	printTree(nodes, "", true, dim)
+
+	// Count files
+	fileCount := 0
+	filepath.Walk(docPath, func(_ string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() {
+			fileCount++
+		}
+		return nil
+	})
+
+	fmt.Printf("\n%d files\n", fileCount)
+	return nil
 }
