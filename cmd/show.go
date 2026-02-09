@@ -52,7 +52,7 @@ func runShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("use 'agmd task show %s' to show tasks", name)
 	}
 	if itemType == "doc" {
-		return fmt.Errorf("use 'agmd doc show %s' to show docs (not yet implemented)", name)
+		return fmt.Errorf("use 'agmd doc show %s' to show docs", name)
 	}
 	if itemType == "file" {
 		return fmt.Errorf("use 'agmd file show %s' to show files", name)

@@ -63,7 +63,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("use 'agmd task new %s' to create tasks", name)
 	}
 	if itemType == "doc" {
-		return fmt.Errorf("use 'agmd doc new %s' to create docs (not yet implemented)", name)
+		return fmt.Errorf("use 'agmd doc add <path> %s' to add documentation folders", name)
 	}
 	if itemType == "file" {
 		return fmt.Errorf("use 'agmd file new %s' to create files", name)

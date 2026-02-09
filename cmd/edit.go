@@ -88,7 +88,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("use 'agmd task show %s' then edit manually, or update via 'agmd task status'", name)
 	}
 	if itemType == "doc" {
-		return fmt.Errorf("use 'agmd doc edit %s' to edit docs (not yet implemented)", name)
+		return fmt.Errorf("docs are read-only folders; use 'agmd doc show %s' to view contents", name)
 	}
 	if itemType == "file" {
 		return fmt.Errorf("use 'agmd file show %s' to view, then edit with your editor", name)

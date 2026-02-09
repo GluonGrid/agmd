@@ -61,7 +61,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	if len(args) > 0 && args[0] == "doc" {
-		fmt.Printf("Use 'agmd doc list' to list docs (not yet implemented)\n")
+		fmt.Printf("Use 'agmd doc list' to list docs\n")
 		return nil
 	}
 	if len(args) > 0 && args[0] == "file" {

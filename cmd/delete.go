@@ -64,7 +64,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("use 'agmd task delete %s' to delete tasks", name)
 	}
 	if itemType == "doc" {
-		return fmt.Errorf("use 'agmd doc delete %s' to delete docs (not yet implemented)", name)
+		return fmt.Errorf("use 'agmd doc delete %s' to delete docs", name)
 	}
 	if itemType == "file" {
 		return fmt.Errorf("use 'agmd file delete %s' to delete files", name)
