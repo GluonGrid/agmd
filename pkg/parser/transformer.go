@@ -152,18 +152,30 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 	heading.AppendChild(heading, ast.NewString([]byte("Available Documentation")))
 	docsBlock.AppendChild(docsBlock, heading)
 
-	list := ast.NewList('-')
 	for _, doc := range docs {
-		item := ast.NewListItem(0)
-		text := ast.NewString([]byte(
-			"**" + doc.Name + "** - `" + doc.Path + "` (" + itoa(doc.FileCount) + " files)",
-		))
-		para := ast.NewParagraph()
-		para.AppendChild(para, text)
-		item.AppendChild(item, para)
-		list.AppendChild(list, item)
+		// Try to get description from description.md
+		description := getDocDescription(doc.Target)
+
+		// Build header line: **name** - description (or just **name** if no description)
+		var headerText string
+		if description != "" {
+			headerText = "**" + doc.Name + "** - " + description
+		} else {
+			headerText = "**" + doc.Name + "** (`" + doc.Path + "`, " + itoa(doc.FileCount) + " files)"
+		}
+
+		headerPara := ast.NewParagraph()
+		headerPara.AppendChild(headerPara, ast.NewString([]byte(headerText)))
+		docsBlock.AppendChild(docsBlock, headerPara)
+
+		// Build compact tree structure
+		tree := buildCompactTree(doc.Target)
+		if tree != "" {
+			treePara := ast.NewParagraph()
+			treePara.AppendChild(treePara, ast.NewString([]byte(tree)))
+			docsBlock.AppendChild(docsBlock, treePara)
+		}
 	}
-	docsBlock.AppendChild(docsBlock, list)
 }
 
 type docInfo struct {
@@ -196,6 +208,165 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return result
+}
+
+// getDocDescription reads the first line of description.md if it exists
+func getDocDescription(docPath string) string {
+	descPath := filepath.Join(docPath, "description.md")
+	data, err := os.ReadFile(descPath)
+	if err != nil {
+		return ""
+	}
+	// Get first non-empty line
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			return line
+		}
+	}
+	return ""
+}
+
+// buildCompactTree builds a compact tree representation of a directory
+// Format: folder/*.ext: {file1,file2,file3} or folder/: {sub1,sub2}/*.ext
+func buildCompactTree(rootPath string) string {
+	entries, err := os.ReadDir(rootPath)
+	if err != nil {
+		return ""
+	}
+
+	var lines []string
+	for _, entry := range entries {
+		// Skip description.md
+		if entry.Name() == "description.md" {
+			continue
+		}
+
+		if entry.IsDir() {
+			subPath := filepath.Join(rootPath, entry.Name())
+			subTree := buildDirCompact(subPath, entry.Name())
+			if subTree != "" {
+				lines = append(lines, "  "+subTree)
+			}
+		} else {
+			// Root-level file - just add it
+			lines = append(lines, "  "+entry.Name())
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// buildDirCompact builds a compact representation of a directory
+func buildDirCompact(dirPath string, dirName string) string {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return ""
+	}
+
+	// Separate files and subdirectories
+	var files []string
+	var subdirs []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subdirs = append(subdirs, entry.Name())
+		} else {
+			files = append(files, entry.Name())
+		}
+	}
+
+	// Group files by extension
+	extGroups := make(map[string][]string)
+	for _, f := range files {
+		ext := filepath.Ext(f)
+		name := strings.TrimSuffix(f, ext)
+		if ext == "" {
+			ext = "(no ext)"
+		}
+		extGroups[ext] = append(extGroups[ext], name)
+	}
+
+	var parts []string
+
+	// Build compact file list grouped by extension
+	for ext, names := range extGroups {
+		if ext == "(no ext)" {
+			parts = append(parts, strings.Join(names, ", "))
+		} else if len(names) == 1 {
+			parts = append(parts, names[0]+ext)
+		} else {
+			parts = append(parts, "{"+strings.Join(names, ",")+"}"+ext)
+		}
+	}
+
+	// Build subdirectory representations
+	for _, subdir := range subdirs {
+		subPath := filepath.Join(dirPath, subdir)
+		subCompact := buildSubdirCompact(subPath, subdir)
+		if subCompact != "" {
+			parts = append(parts, subCompact)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return dirName + "/: " + strings.Join(parts, ", ")
+}
+
+// buildSubdirCompact builds compact representation of a subdirectory (one level)
+func buildSubdirCompact(dirPath string, dirName string) string {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return ""
+	}
+
+	var files []string
+	var subdirs []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subdirs = append(subdirs, entry.Name()+"/")
+		} else {
+			files = append(files, entry.Name())
+		}
+	}
+
+	// Group files by extension
+	extGroups := make(map[string][]string)
+	for _, f := range files {
+		ext := filepath.Ext(f)
+		name := strings.TrimSuffix(f, ext)
+		if ext == "" {
+			ext = "(no ext)"
+		}
+		extGroups[ext] = append(extGroups[ext], name)
+	}
+
+	var parts []string
+
+	// Build compact file list
+	for ext, names := range extGroups {
+		if ext == "(no ext)" {
+			parts = append(parts, strings.Join(names, ", "))
+		} else if len(names) == 1 {
+			parts = append(parts, names[0]+ext)
+		} else {
+			parts = append(parts, "{"+strings.Join(names, ",")+"}"+ext)
+		}
+	}
+
+	// Add subdirectory markers
+	parts = append(parts, subdirs...)
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return dirName + "/{" + strings.Join(parts, ", ") + "}"
 }
 
 // extractFrontmatter separates YAML frontmatter from markdown content
