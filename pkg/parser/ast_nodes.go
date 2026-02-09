@@ -60,3 +60,33 @@ func NewNewItemBlock(itemType, name string) *NewItemBlock {
 		Name:     name,
 	}
 }
+
+// DocsBlock represents :::docs directive
+// It expands to list available doc symlinks in the project
+type DocsBlock struct {
+	ast.BaseBlock
+	SearchPath string // Optional: custom path to search for docs (default: "docs")
+}
+
+// KindDocsBlock is the kind of DocsBlock
+var KindDocsBlock = ast.NewNodeKind("DocsBlock")
+
+// Kind implements ast.Node
+func (n *DocsBlock) Kind() ast.NodeKind {
+	return KindDocsBlock
+}
+
+// Dump implements ast.Node
+func (n *DocsBlock) Dump(source []byte, level int) {
+	ast.DumpHelper(n, source, level, nil, nil)
+}
+
+// NewDocsBlock creates a new DocsBlock
+func NewDocsBlock(searchPath string) *DocsBlock {
+	if searchPath == "" {
+		searchPath = "docs"
+	}
+	return &DocsBlock{
+		SearchPath: searchPath,
+	}
+}

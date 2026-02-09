@@ -101,6 +101,30 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return node, parser.HasChildren
 	}
 
+	// Match :::docs [path] (single line directive)
+	// Example: :::docs or :::docs ./reference
+	docsRe := regexp.MustCompile(`^:::docs(?:\s+(.+))?`)
+	if match := docsRe.FindSubmatch(line); match != nil {
+		searchPath := ""
+		if len(match) > 1 && match[1] != nil {
+			searchPath = string(bytes.TrimSpace(match[1]))
+		}
+
+		node := NewDocsBlock(searchPath)
+
+		pc.Set(directiveDataKey, &directiveData{node})
+
+		// Advance past the :::docs line
+		newline := 1
+		if len(line) > 0 && line[len(line)-1] != '\n' {
+			newline = 0
+		}
+		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+
+		// Single line directive, close immediately
+		return node, parser.NoChildren | parser.Continue
+	}
+
 	return nil, parser.NoChildren
 }
 
@@ -110,6 +134,11 @@ func (b *directiveParser) Continue(node ast.Node, reader text.Reader, pc parser.
 
 	// For single-item includes, close immediately
 	if listBlock, ok := node.(*ListBlock); ok && listBlock.IsSingleItem {
+		return parser.Close
+	}
+
+	// For DocsBlock, close immediately (single line directive)
+	if _, ok := node.(*DocsBlock); ok {
 		return parser.Close
 	}
 

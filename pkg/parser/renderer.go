@@ -33,6 +33,10 @@ func (r *MarkdownRenderer) renderNode(w io.Writer, source []byte, node ast.Node,
 		// ListBlock has been expanded, just render its children
 		return ast.WalkContinue, nil
 
+	case *DocsBlock:
+		// DocsBlock has been expanded, just render its children
+		return ast.WalkContinue, nil
+
 	case *NewItemBlock:
 		if entering {
 			// Render new item block content

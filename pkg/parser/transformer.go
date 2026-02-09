@@ -40,6 +40,8 @@ func (t *DirectiveTransformer) Transform(node *ast.Document, reader text.Reader,
 		switch block := n.(type) {
 		case *ListBlock:
 			t.expandListBlock(block, node, reader)
+		case *DocsBlock:
+			t.expandDocsBlock(block)
 		case *NewItemBlock:
 			// Keep as-is, content already parsed as children
 		}
@@ -81,6 +83,119 @@ func (t *DirectiveTransformer) loadItemContent(registryPath, name string) (strin
 	// Extract frontmatter and content
 	_, content := extractFrontmatter(data)
 	return strings.TrimSpace(string(content)), nil
+}
+
+// expandDocsBlock expands :::docs by detecting doc symlinks in project
+func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
+	searchPath := docsBlock.SearchPath
+
+	// Check if the search path exists
+	info, err := os.Stat(searchPath)
+	if err != nil || !info.IsDir() {
+		// No docs directory found, add a note
+		para := ast.NewParagraph()
+		para.AppendChild(para, ast.NewString([]byte("*No documentation linked. Use `agmd doc link <name>` to add documentation.*")))
+		docsBlock.AppendChild(docsBlock, para)
+		return
+	}
+
+	// Find symlinks to doc folders
+	entries, err := os.ReadDir(searchPath)
+	if err != nil {
+		return
+	}
+
+	var docs []docInfo
+	for _, entry := range entries {
+		entryPath := filepath.Join(searchPath, entry.Name())
+
+		// Check if it's a symlink
+		fileInfo, err := os.Lstat(entryPath)
+		if err != nil {
+			continue
+		}
+
+		if fileInfo.Mode()&os.ModeSymlink != 0 {
+			// It's a symlink - resolve it to absolute path
+			target, err := filepath.EvalSymlinks(entryPath)
+			if err != nil {
+				continue
+			}
+
+			// Check if target is a directory
+			targetInfo, err := os.Stat(target)
+			if err != nil || !targetInfo.IsDir() {
+				continue
+			}
+
+			// Count files in the doc (use resolved target path)
+			fileCount := countFilesInDir(target)
+
+			docs = append(docs, docInfo{
+				Name:      entry.Name(),
+				Path:      entryPath,
+				Target:    target,
+				FileCount: fileCount,
+			})
+		}
+	}
+
+	if len(docs) == 0 {
+		para := ast.NewParagraph()
+		para.AppendChild(para, ast.NewString([]byte("*No documentation linked. Use `agmd doc link <name>` to add documentation.*")))
+		docsBlock.AppendChild(docsBlock, para)
+		return
+	}
+
+	// Build documentation list
+	heading := ast.NewHeading(3)
+	heading.AppendChild(heading, ast.NewString([]byte("Available Documentation")))
+	docsBlock.AppendChild(docsBlock, heading)
+
+	list := ast.NewList('-')
+	for _, doc := range docs {
+		item := ast.NewListItem(0)
+		text := ast.NewString([]byte(
+			"**" + doc.Name + "** - `" + doc.Path + "` (" + itoa(doc.FileCount) + " files)",
+		))
+		para := ast.NewParagraph()
+		para.AppendChild(para, text)
+		item.AppendChild(item, para)
+		list.AppendChild(list, item)
+	}
+	docsBlock.AppendChild(docsBlock, list)
+}
+
+type docInfo struct {
+	Name      string
+	Path      string
+	Target    string
+	FileCount int
+}
+
+// countFilesInDir counts all files in a directory recursively
+func countFilesInDir(path string) int {
+	count := 0
+	filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
+// itoa converts int to string without importing strconv
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	result := ""
+	for i > 0 {
+		result = string(rune('0'+i%10)) + result
+		i /= 10
+	}
+	return result
 }
 
 // extractFrontmatter separates YAML frontmatter from markdown content
