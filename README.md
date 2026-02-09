@@ -286,6 +286,23 @@ go install github.com/GluonGrid/agmd@latest
 
 Download binaries from [Releases](https://github.com/GluonGrid/agmd/releases).
 
+### Shell Completion
+
+Enable tab completion for commands, types, and item names:
+
+```bash
+# Bash (add to ~/.bashrc)
+eval "$(agmd completion bash)"
+
+# Zsh (add to ~/.zshrc)
+eval "$(agmd completion zsh)"
+
+# Fish (add to ~/.config/fish/config.fish)
+agmd completion fish | source
+```
+
+Restart your shell or source the config file to enable completions.
+
 ## Configuration
 
 agmd works out of the box with sensible defaults:
