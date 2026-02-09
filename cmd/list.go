@@ -121,6 +121,29 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Special handling for profiles to show files count
+		if typeName == "profile" {
+			profiles, err := reg.ListProfiles()
+			if err != nil || len(profiles) == 0 {
+				continue
+			}
+
+			fmt.Printf("%s/ (%d)\n", typeName, len(profiles))
+			for _, profile := range profiles {
+				filesInfo := ""
+				if len(profile.Files) > 0 {
+					filesInfo = fmt.Sprintf(" [%d files]", len(profile.Files))
+				}
+				if profile.Description != "" {
+					fmt.Printf("  %s - %s%s\n", profile.Name, profile.Description, filesInfo)
+				} else {
+					fmt.Printf("  %s%s\n", profile.Name, filesInfo)
+				}
+			}
+			fmt.Println()
+			continue
+		}
+
 		items, err := reg.ListItems(typeName)
 		if err != nil || len(items) == 0 {
 			continue
