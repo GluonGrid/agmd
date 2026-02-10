@@ -20,11 +20,21 @@ type Task struct {
 	Name        string   `yaml:"-"`
 	Subject     string   `yaml:"subject"`
 	Status      string   `yaml:"status"`
+	Priority    int      `yaml:"priority,omitempty"`  // 0-4 (P0=critical, P4=backlog)
+	Type        string   `yaml:"type,omitempty"`      // bug, feature, task, chore
 	Feature     string   `yaml:"feature,omitempty"`
 	DependsOn   []string `yaml:"depends_on"`
 	Content     string   `yaml:"-"`
 	FilePath    string   `yaml:"-"`
 	ProjectName string   `yaml:"-"`
+}
+
+// Valid task types
+var validTaskTypes = map[string]bool{
+	"bug":     true,
+	"feature": true,
+	"task":    true,
+	"chore":   true,
 }
 
 // ComputedStatus represents the computed status of a task
@@ -48,6 +58,10 @@ var taskNoEditor bool
 var taskRaw bool
 var taskStatus string
 var taskTree bool
+var taskPriority int
+var taskType string
+var taskFilterPriority string
+var taskFilterType string
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -82,13 +96,16 @@ var taskListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List tasks for current project",
-	Long: `List tasks for the current project, auto-sorted by status.
+	Long: `List tasks for the current project, auto-sorted by priority then status.
 
-Tasks are sorted: ready → in_progress → blocked → completed.
+Tasks are sorted: P0 → P4, then ready → in_progress → blocked → completed.
 Completed tasks are hidden by default (use --all to show).
-Use --feature to filter tasks by feature/session.
-Use --status to filter by computed status (ready, blocked, in_progress, completed).
-Use --tree to show dependency tree visualization.
+
+Filters:
+  --feature     Filter by feature/session
+  --status      Filter by computed status (ready, blocked, in_progress, completed)
+  --priority    Filter by priority (0-4 or P0-P4)
+  --type        Filter by type (bug, feature, task, chore)
 
 Examples:
   agmd task list                            # List active tasks
@@ -96,7 +113,9 @@ Examples:
   agmd task list --all                      # Include completed tasks
   agmd task list --feature auth             # Only tasks for "auth" feature
   agmd task list --status ready             # Only ready tasks
-  agmd task list --status blocked           # Only blocked tasks
+  agmd task list --priority 0               # Only critical tasks (P0)
+  agmd task list --type bug                 # Only bugs
+  agmd task list --type bug --priority 0    # Critical bugs only
   agmd task list --tree                     # Show dependency tree
   agmd task list --project myproj           # List tasks for specific project`,
 	RunE: runTaskList,
@@ -107,11 +126,15 @@ var taskNewCmd = &cobra.Command{
 	Short: "Create a new task",
 	Long: `Create a new task for the current project.
 
+Priority levels: 0=critical, 1=high, 2=medium (default), 3=low, 4=backlog
+Task types: bug, feature, task (default), chore
+
 Examples:
   agmd task new setup-db --content "Set up database"
+  agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
+  agmd task new add-dark-mode -t feature -p 2 --content "Add dark mode"
   agmd task new create-api --content "Create API" --blocked-by "setup-db"
   agmd task new setup-db --feature auth --content "Set up auth DB"
-  agmd task new my-task --project other-project
   echo "Task description" | agmd task new setup-db`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskNew,
@@ -207,12 +230,20 @@ func init() {
 	taskListCmd.Flags().StringVar(&taskStatus, "status", "", "Filter by computed status (ready, blocked, in_progress, completed)")
 	taskListCmd.RegisterFlagCompletionFunc("status", completeListStatusFlag)
 	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization")
+	taskListCmd.Flags().StringVarP(&taskFilterPriority, "priority", "p", "", "Filter by priority (0-4 or P0-P4)")
+	taskListCmd.Flags().StringVarP(&taskFilterType, "type", "t", "", "Filter by type (bug, feature, task, chore)")
+	taskListCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
+	taskListCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
 	taskNewCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
 	taskNewCmd.Flags().StringVar(&taskFeature, "feature", "", "Feature/session name for this task")
 	taskNewCmd.Flags().StringVar(&taskContent, "content", "", "Task content/description")
 	taskNewCmd.Flags().StringVar(&taskBlockedBy, "blocked-by", "", "Comma-separated list of task dependencies")
 	taskNewCmd.Flags().BoolVar(&taskNoEditor, "no-editor", false, "Don't open editor after creating")
+	taskNewCmd.Flags().IntVarP(&taskPriority, "priority", "p", 2, "Priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
+	taskNewCmd.Flags().StringVarP(&taskType, "type", "t", "task", "Type (bug, feature, task, chore)")
+	taskNewCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
+	taskNewCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
 	taskShowCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
 	taskShowCmd.Flags().StringVar(&taskFeature, "feature", "", "Filter tasks by feature")
@@ -313,11 +344,15 @@ func saveTask(task *Task) error {
 	frontmatter := struct {
 		Subject   string   `yaml:"subject"`
 		Status    string   `yaml:"status"`
+		Priority  int      `yaml:"priority,omitempty"`
+		Type      string   `yaml:"type,omitempty"`
 		Feature   string   `yaml:"feature,omitempty"`
 		DependsOn []string `yaml:"depends_on"`
 	}{
 		Subject:   task.Subject,
 		Status:    task.Status,
+		Priority:  task.Priority,
+		Type:      task.Type,
 		Feature:   task.Feature,
 		DependsOn: task.DependsOn,
 	}
@@ -386,8 +421,8 @@ func computeTaskStatus(task *Task, allTasks map[string]*Task) ComputedStatus {
 	return StatusReady
 }
 
-// sortTasksByStatus sorts tasks: ready -> in_progress -> blocked -> completed
-func sortTasksByStatus(tasks []*Task, allTasks map[string]*Task) []*Task {
+// sortTasksByPriorityAndStatus sorts tasks: P0 -> P4, then ready -> in_progress -> blocked -> completed
+func sortTasksByPriorityAndStatus(tasks []*Task, allTasks map[string]*Task) []*Task {
 	// Compute status for each task
 	type taskWithStatus struct {
 		task   *Task
@@ -402,7 +437,7 @@ func sortTasksByStatus(tasks []*Task, allTasks map[string]*Task) []*Task {
 		}
 	}
 
-	// Sort by status priority
+	// Sort by priority first, then by status
 	statusPriority := map[ComputedStatus]int{
 		StatusReady:      0,
 		StatusInProgress: 1,
@@ -411,6 +446,11 @@ func sortTasksByStatus(tasks []*Task, allTasks map[string]*Task) []*Task {
 	}
 
 	sort.SliceStable(tasksWithStatus, func(i, j int) bool {
+		// First compare by priority (lower is higher priority)
+		if tasksWithStatus[i].task.Priority != tasksWithStatus[j].task.Priority {
+			return tasksWithStatus[i].task.Priority < tasksWithStatus[j].task.Priority
+		}
+		// Then by status
 		return statusPriority[tasksWithStatus[i].status] < statusPriority[tasksWithStatus[j].status]
 	})
 
@@ -443,6 +483,68 @@ func filterTasksByFeature(tasks []*Task, feature string) []*Task {
 		}
 	}
 	return filtered
+}
+
+// parsePriority parses priority from string (0-4 or P0-P4)
+func parsePriority(s string) (int, error) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	// Handle P0-P4 format
+	if len(s) == 2 && s[0] == 'P' {
+		s = string(s[1])
+	}
+	// Parse as integer
+	if len(s) == 1 && s[0] >= '0' && s[0] <= '4' {
+		return int(s[0] - '0'), nil
+	}
+	return 0, fmt.Errorf("invalid priority '%s'. Use 0-4 or P0-P4", s)
+}
+
+// formatPriorityBadge returns a colored priority badge
+func formatPriorityBadge(priority int) string {
+	red := color.New(color.FgRed, color.Bold).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+	white := color.New(color.FgWhite).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+
+	switch priority {
+	case 0:
+		return red("[P0]")
+	case 1:
+		return yellow("[P1]")
+	case 2:
+		return white("[P2]")
+	case 3:
+		return dim("[P3]")
+	case 4:
+		return dim("[P4]")
+	default:
+		return ""
+	}
+}
+
+// formatTypeBadge returns a colored type badge
+func formatTypeBadge(taskType string) string {
+	red := color.New(color.FgRed).SprintFunc()
+	magenta := color.New(color.FgMagenta).SprintFunc()
+	cyan := color.New(color.FgCyan).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+
+	if taskType == "" {
+		taskType = "task"
+	}
+
+	switch taskType {
+	case "bug":
+		return red("[bug]")
+	case "feature":
+		return magenta("[feature]")
+	case "task":
+		return cyan("[task]")
+	case "chore":
+		return dim("[chore]")
+	default:
+		return dim("[" + taskType + "]")
+	}
 }
 
 // buildDependencyTree prints tasks in a tree format showing dependency chains
@@ -646,8 +748,42 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Sort by dependency status
-	sorted := sortTasksByStatus(tasks, taskMap)
+	// Filter by priority if specified
+	if taskFilterPriority != "" {
+		priority, err := parsePriority(taskFilterPriority)
+		if err != nil {
+			return err
+		}
+		var filtered []*Task
+		for _, t := range tasks {
+			if t.Priority == priority {
+				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
+	}
+
+	// Filter by type if specified
+	if taskFilterType != "" {
+		if !validTaskTypes[taskFilterType] {
+			return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskFilterType)
+		}
+		var filtered []*Task
+		for _, t := range tasks {
+			// Empty type defaults to "task"
+			taskType := t.Type
+			if taskType == "" {
+				taskType = "task"
+			}
+			if taskType == taskFilterType {
+				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
+	}
+
+	// Sort by priority then status
+	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
 
 	// Count by status
 	completedCount := 0
@@ -685,24 +821,41 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		}
 
 		// Status badge
-		var badge string
+		var statusBadge string
 		switch status {
 		case StatusReady:
-			badge = green("[ready]")
+			statusBadge = green("[ready]")
 		case StatusInProgress:
-			badge = blue("[in_progress]")
+			statusBadge = blue("[in_progress]")
 		case StatusBlocked:
-			badge = red("[blocked]")
+			statusBadge = red("[blocked]")
 		case StatusCompleted:
-			badge = dim("[completed] ✓")
+			statusBadge = dim("[completed] ✓")
+		}
+
+		// Priority badge (only show if non-default P2)
+		priorityBadge := ""
+		if t.Priority != 2 {
+			priorityBadge = " " + formatPriorityBadge(t.Priority)
+		}
+
+		// Type badge (only show if non-default task)
+		typeBadge := ""
+		taskTypeVal := t.Type
+		if taskTypeVal == "" {
+			taskTypeVal = "task"
+		}
+		if taskTypeVal != "task" {
+			typeBadge = " " + formatTypeBadge(taskTypeVal)
 		}
 
 		// Show feature tag when not filtering by feature
+		featureTag := ""
 		if t.Feature != "" && taskFeature == "" {
-			fmt.Printf("%s %s %s\n", badge, t.Name, dim("("+t.Feature+")"))
-		} else {
-			fmt.Printf("%s %s\n", badge, t.Name)
+			featureTag = " " + dim("("+t.Feature+")")
 		}
+
+		fmt.Printf("%s%s%s %s%s\n", statusBadge, priorityBadge, typeBadge, t.Name, featureTag)
 
 		// Subject (if different from name)
 		if t.Subject != "" && t.Subject != strings.Title(strings.ReplaceAll(t.Name, "-", " ")) {
@@ -750,6 +903,16 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
+	}
+
+	// Validate priority
+	if taskPriority < 0 || taskPriority > 4 {
+		return fmt.Errorf("invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskPriority)
+	}
+
+	// Validate type
+	if !validTaskTypes[taskType] {
+		return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskType)
 	}
 
 	// Build path: ~/.agmd/task/<project>/<name>.md
@@ -807,20 +970,37 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		dependsOnYAML = "[" + strings.Join(dependsOn, ", ") + "]"
 	}
 
-	// Build feature line (optional)
-	featureLine := ""
+	// Build optional lines
+	var optionalLines string
 	if taskFeature != "" {
-		featureLine = fmt.Sprintf("feature: %s\n", taskFeature)
+		optionalLines += fmt.Sprintf("feature: %s\n", taskFeature)
+	}
+	// Only include priority if non-default (not P2)
+	if taskPriority != 2 {
+		optionalLines += fmt.Sprintf("priority: %d\n", taskPriority)
+	}
+	// Only include type if non-default (not "task")
+	if taskType != "task" {
+		optionalLines += fmt.Sprintf("type: %s\n", taskType)
 	}
 
 	fileContent := fmt.Sprintf("---\nsubject: %s\nstatus: pending\n%sdepends_on: %s\n---\n\n%s",
-		subject, featureLine, dependsOnYAML, strings.TrimSpace(content))
+		subject, optionalLines, dependsOnYAML, strings.TrimSpace(content))
 
 	if err := os.WriteFile(filePath, []byte(fileContent+"\n"), 0644); err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
 
-	fmt.Printf("%s Created task:%s (project: %s)\n", green("ok"), name, projectName)
+	// Build info message
+	infoMsg := fmt.Sprintf("%s Created task:%s (project: %s", green("ok"), name, projectName)
+	if taskPriority != 2 {
+		infoMsg += fmt.Sprintf(", P%d", taskPriority)
+	}
+	if taskType != "task" {
+		infoMsg += fmt.Sprintf(", %s", taskType)
+	}
+	infoMsg += ")"
+	fmt.Println(infoMsg)
 
 	// Open editor unless --no-editor or content was provided
 	if taskNoEditor || taskContent != "" || !isTerminal(os.Stdin) {
@@ -893,6 +1073,13 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s %s\n", dim("subject:"), task.Subject)
 	fmt.Printf("%s %s\n", dim("status:"), task.Status)
+	// Always show priority for non-default (P2 is default)
+	if task.Priority != 2 {
+		fmt.Printf("%s P%d\n", dim("priority:"), task.Priority)
+	}
+	if task.Type != "" && task.Type != "task" {
+		fmt.Printf("%s %s\n", dim("type:"), task.Type)
+	}
 	if task.Feature != "" {
 		fmt.Printf("%s %s\n", dim("feature:"), task.Feature)
 	}
@@ -937,7 +1124,7 @@ func runTaskShowAll(reg *registry.Registry) error {
 	for _, t := range tasks {
 		taskMap[t.Name] = t
 	}
-	sorted := sortTasksByStatus(tasks, taskMap)
+	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
 
 	fmt.Printf("Tasks for: %s\n\n", cyan(projectName))
 
@@ -947,6 +1134,12 @@ func runTaskShowAll(reg *registry.Registry) error {
 		fmt.Printf("%s %s [%s]\n", dim("---"), t.Name, string(status))
 		fmt.Printf("%s %s\n", dim("subject:"), t.Subject)
 		fmt.Printf("%s %s\n", dim("status:"), t.Status)
+		if t.Priority != 0 {
+			fmt.Printf("%s P%d\n", dim("priority:"), t.Priority)
+		}
+		if t.Type != "" && t.Type != "task" {
+			fmt.Printf("%s %s\n", dim("type:"), t.Type)
+		}
 		if t.Feature != "" {
 			fmt.Printf("%s %s\n", dim("feature:"), t.Feature)
 		}

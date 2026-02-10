@@ -170,6 +170,41 @@ func completeListStatusFlag(cmd *cobra.Command, args []string, toComplete string
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completePriorityFlag provides completion for --priority flag values
+func completePriorityFlag(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	priorities := []string{
+		"0\tcritical",
+		"1\thigh",
+		"2\tmedium (default)",
+		"3\tlow",
+		"4\tbacklog",
+	}
+	var completions []string
+	for _, p := range priorities {
+		if strings.HasPrefix(p, toComplete) || strings.HasPrefix("P"+p, strings.ToUpper(toComplete)) {
+			completions = append(completions, p)
+		}
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeTypeFlag provides completion for --type flag values
+func completeTypeFlag(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	types := []string{
+		"bug\tDefect to fix",
+		"feature\tNew functionality",
+		"task\tGeneral task (default)",
+		"chore\tMaintenance work",
+	}
+	var completions []string
+	for _, t := range types {
+		if strings.HasPrefix(t, toComplete) {
+			completions = append(completions, t)
+		}
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
 // completeProfileName provides completion for profile names
 func completeProfileName(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {

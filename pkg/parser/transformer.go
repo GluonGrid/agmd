@@ -152,6 +152,11 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 	heading.AppendChild(heading, ast.NewString([]byte("Available Documentation")))
 	docsBlock.AppendChild(docsBlock, heading)
 
+	// Add path note
+	pathNote := ast.NewParagraph()
+	pathNote.AppendChild(pathNote, ast.NewString([]byte("*Located in `"+searchPath+"/`*")))
+	docsBlock.AppendChild(docsBlock, pathNote)
+
 	for _, doc := range docs {
 		// Try to get description from description.md
 		description := getDocDescription(doc.Target)
