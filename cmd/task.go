@@ -66,14 +66,28 @@ var taskFilterType string
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage project tasks",
-	Long: `Manage project tasks with dependencies and status tracking.
+	Long: `Manage project tasks with dependencies, priorities, and status tracking.
 
 Tasks are organized by project (based on current directory name).
-Use --feature to scope tasks to a specific feature/session.
+Each task has a priority (P0-P4) and type (bug/feature/task/chore).
+Tasks are auto-sorted by priority then status.
+
+Priority levels:
+  P0  critical    Urgent issues requiring immediate attention
+  P1  high        Important tasks to address soon
+  P2  medium      Default priority for normal tasks
+  P3  low         Can be done when time permits
+  P4  backlog     Ideas and future work
+
+Task types:
+  bug      Defect to fix
+  feature  New functionality
+  task     General task (default)
+  chore    Maintenance work
 
 Subcommands:
-  list        List tasks for current project
-  new         Create a new task
+  list        List tasks (sorted by priority, filterable)
+  new         Create a new task with priority/type
   show        Show task content
   delete      Delete a task
   status      Update task status
@@ -82,14 +96,11 @@ Subcommands:
 
 Examples:
   agmd task list                                    # List all tasks
-  agmd task list --feature auth                     # List tasks for "auth" feature
-  agmd task new setup-db --content "Set up DB"      # Create task
-  agmd task new setup-db --feature auth             # Create task scoped to feature
-  agmd task show setup-db                           # Show task
-  agmd task delete setup-db                         # Delete task
+  agmd task list --type bug --priority 0           # Critical bugs only
+  agmd task new fix-auth -t bug -p 0 --content "Fix login"
+  agmd task new setup-db --content "Set up DB"      # Create task (P2, task)
   agmd task status setup-db completed               # Update status
-  agmd task blocked-by create-api setup-db          # Add dependency
-  agmd task unblock create-api setup-db             # Remove dependency`,
+  agmd task blocked-by create-api setup-db          # Add dependency`,
 }
 
 var taskListCmd = &cobra.Command{

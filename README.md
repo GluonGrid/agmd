@@ -148,6 +148,8 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd migrate <file>` | Migrate a raw CLAUDE.md/AGENTS.md to agmd format |
 | `agmd collect [-f file]` | Collect rules from an agmd project into your registry |
 | `agmd task <action>` | Manage project tasks (list, new, show, delete, status, ...) |
+| `agmd file <action>` | Manage raw files - scripts, configs (list, new, add, show, delete) |
+| `agmd doc <action>` | Manage documentation folders (list, add, show, delete, link, unlink) |
 
 ## Migrating Existing Projects
 
@@ -268,6 +270,19 @@ Reference with full path:
 :::include rule:backend/api-design
 ```
 
+### Reserved Types
+
+Some types have special behavior and dedicated subcommands:
+
+| Type | Command | Description |
+|------|---------|-------------|
+| `task` | `agmd task` | Project tasks with dependencies |
+| `file` | `agmd file` | Raw files without markdown processing |
+| `doc` | `agmd doc` | Documentation folders (symlinked) |
+| `profile` | `agmd init profile:name` | Project templates |
+
+Use `agmd new type:name` for all other types (rule, workflow, guideline, prompt, etc.).
+
 ## Installation
 
 ### Quick Install
@@ -324,13 +339,16 @@ agmd works out of the box with sensible defaults:
 agmd includes project-based task tracking with dependencies:
 
 ```bash
-# Create tasks
+# Create tasks with priority and type
 agmd task new setup-db --content "Set up database schema"
+agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
+agmd task new add-dark-mode -t feature -p 1 --content "Add dark mode"
 agmd task new create-api --content "Create endpoints" --blocked-by "setup-db"
 agmd task new setup-db --feature auth     # Scope task to a feature
 
-# List tasks (auto-sorted: ready → in_progress → blocked → completed)
+# List tasks (auto-sorted: P0→P4, then ready → blocked → completed)
 agmd task list                            # All tasks for current project
+agmd task list --type bug --priority 0    # Critical bugs only
 agmd task list --feature auth             # Filter by feature
 agmd task list --status ready             # Filter by computed status
 agmd task list --tree                     # Show dependency tree
@@ -347,7 +365,65 @@ agmd task show --all                      # Show all tasks with content
 agmd task delete setup-db --force         # Delete task
 ```
 
-Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by dependency status. Use `--feature` to scope tasks to specific features or sessions within a project. The `--status` flag filters by computed status (`ready`, `blocked`, `in_progress`, `completed`), and `--tree` visualizes dependency chains. Dependencies passed via `--blocked-by` are validated to ensure they exist.
+**Priority levels:** P0 (critical), P1 (high), P2 (medium/default), P3 (low), P4 (backlog)
+**Task types:** bug, feature, task (default), chore
+
+Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by priority then status. Use `--feature` to scope tasks to specific features or sessions within a project. The `--status`, `--priority`, and `--type` flags filter tasks, and `--tree` visualizes dependency chains. Dependencies passed via `--blocked-by` are validated to ensure they exist.
+
+## File Management
+
+Store raw files (scripts, configs, templates) without markdown processing:
+
+```bash
+# Add files to registry
+agmd file new setup.sh --content "#!/bin/bash\necho hello"
+agmd file add ./scripts/deploy.sh           # Copy existing file
+agmd file add ./config.json settings.json   # Copy with new name
+
+# List and view
+agmd file list                              # List all files
+agmd file show setup.sh                     # Display file content
+
+# Delete
+agmd file delete setup.sh                   # Delete with confirmation
+agmd file delete setup.sh --force           # Skip confirmation
+```
+
+Files are stored as-is in `~/.agmd/file/` without frontmatter processing. Use profiles with a `files:` field to copy files into projects on `agmd init`.
+
+## Documentation Folders
+
+Manage multi-file documentation that can be symlinked into projects:
+
+```bash
+# Add documentation to registry
+agmd doc add ./docs svelte-kit              # Copy docs folder
+agmd doc add ./reference api --force        # Overwrite existing
+
+# List and view
+agmd doc list                               # List all docs
+agmd doc show svelte-kit                    # Show folder contents
+
+# Link into projects (creates symlink)
+agmd doc link svelte-kit                    # Creates docs/svelte-kit → ~/.agmd/doc/svelte-kit
+agmd doc link svelte-kit ./reference        # Custom destination
+agmd doc link svelte-kit --gitignore        # Also add to .gitignore
+
+# Unlink
+agmd doc unlink svelte-kit                  # Remove symlink
+
+# Delete from registry
+agmd doc delete svelte-kit
+```
+
+Docs are stored in `~/.agmd/doc/` as folders. Unlike files (which are copied), docs are symlinked into projects for easy updates.
+
+Use the `:::docs` directive in `directives.md` to automatically list linked documentation:
+
+```markdown
+:::docs           # Lists all symlinked docs in ./docs/
+:::docs ./ref     # Lists symlinked docs in ./ref/
+```
 
 ## AI Assistant Integration
 
@@ -357,15 +433,23 @@ agmd is designed to be used by AI coding assistants. All commands support non-in
 # Read content without opening editor
 agmd show rule:typescript
 agmd show rule:typescript --raw    # Include frontmatter
+agmd file show script.sh           # Show raw file
+agmd doc show my-docs              # Show doc folder contents
 
 # Create items without editor
 agmd new rule:test --no-editor
 agmd new rule:test --content "# My Rule\nContent here"
 echo "# My Rule" | agmd new rule:test
+agmd file new script.sh --content "#!/bin/bash"
 
 # Update items without editor
 agmd edit rule:test --content "# Updated content"
 echo "New content" | agmd edit rule:test
+
+# Task management
+agmd task new setup-db --content "Set up database"
+agmd task status setup-db completed
+agmd task show --all               # Show all tasks with content
 ```
 
 ## Roadmap
