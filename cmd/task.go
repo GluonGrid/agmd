@@ -88,6 +88,7 @@ Task types:
 Subcommands:
   list        List tasks (sorted by priority, filterable)
   new         Create a new task with priority/type
+  edit        Edit task priority or type
   show        Show task content
   delete      Delete a task
   status      Update task status
@@ -99,6 +100,7 @@ Examples:
   agmd task list --type bug --priority 0           # Critical bugs only
   agmd task new fix-auth -t bug -p 0 --content "Fix login"
   agmd task new setup-db --content "Set up DB"      # Create task (P2, task)
+  agmd task edit setup-db -p 0 -t bug              # Change priority and type
   agmd task status setup-db completed               # Update status
   agmd task blocked-by create-api setup-db          # Add dependency`,
 }
@@ -224,6 +226,26 @@ Examples:
 	RunE:              runTaskUnblock,
 }
 
+var taskEditPriority int = -1 // -1 means not set
+var taskEditType string
+
+var taskEditCmd = &cobra.Command{
+	Use:   "edit <task-name>",
+	Short: "Edit task priority or type",
+	Long: `Edit a task's priority or type.
+
+Use -p/--priority to change priority (0-4 or P0-P4).
+Use -t/--type to change type (bug, feature, task, chore).
+
+Examples:
+  agmd task edit setup-db -p 0              # Set to critical priority
+  agmd task edit setup-db -t bug            # Change type to bug
+  agmd task edit setup-db -p 1 -t feature   # Change both`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTaskName,
+	RunE:              runTaskEdit,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskListCmd)
@@ -233,6 +255,7 @@ func init() {
 	taskCmd.AddCommand(taskStatusCmd)
 	taskCmd.AddCommand(taskBlockedByCmd)
 	taskCmd.AddCommand(taskUnblockCmd)
+	taskCmd.AddCommand(taskEditCmd)
 
 	// Add --project and --feature flags to subcommands that need them
 	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
@@ -267,6 +290,12 @@ func init() {
 	taskStatusCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
 	taskBlockedByCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
 	taskUnblockCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+
+	taskEditCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskEditCmd.Flags().IntVarP(&taskEditPriority, "priority", "p", -1, "New priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
+	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
+	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
+	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 }
 
 // getProjectName returns the project name (from flag or cwd)
@@ -1191,6 +1220,78 @@ func runTaskShowAll(reg *registry.Registry) error {
 		}
 	}
 
+	return nil
+}
+
+func runTaskEdit(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+
+	taskName := args[0]
+
+	// Check if at least one flag is provided
+	if taskEditPriority == -1 && taskEditType == "" {
+		return fmt.Errorf("specify at least one of --priority or --type")
+	}
+
+	// Validate priority if provided
+	if taskEditPriority != -1 && (taskEditPriority < 0 || taskEditPriority > 4) {
+		return fmt.Errorf("invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskEditPriority)
+	}
+
+	// Validate type if provided
+	if taskEditType != "" && !validTaskTypes[taskEditType] {
+		return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskEditType)
+	}
+
+	reg, err := registry.New()
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+
+	if !reg.Exists() {
+		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
+	}
+
+	projectName, err := getProjectName()
+	if err != nil {
+		return err
+	}
+
+	taskPath := getTaskPath(reg, projectName, taskName)
+	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
+		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+	}
+
+	task, err := loadTask(taskPath)
+	if err != nil {
+		return fmt.Errorf("failed to load task: %w", err)
+	}
+
+	// Track changes for output message
+	var changes []string
+
+	// Update priority if specified
+	if taskEditPriority != -1 {
+		oldPriority := task.Priority
+		task.Priority = taskEditPriority
+		changes = append(changes, fmt.Sprintf("priority P%d → P%d", oldPriority, taskEditPriority))
+	}
+
+	// Update type if specified
+	if taskEditType != "" {
+		oldType := task.Type
+		if oldType == "" {
+			oldType = "task"
+		}
+		task.Type = taskEditType
+		changes = append(changes, fmt.Sprintf("type %s → %s", oldType, taskEditType))
+	}
+
+	if err := saveTask(task); err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	fmt.Printf("%s Updated task '%s': %s\n", green("✓"), taskName, strings.Join(changes, ", "))
 	return nil
 }
 
