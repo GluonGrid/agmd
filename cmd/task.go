@@ -587,14 +587,19 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		}
 	}
 
-	// Sort roots by status priority
+	// Sort roots by priority first, then status
 	sort.SliceStable(roots, func(i, j int) bool {
 		ti := taskMap[roots[i]]
 		tj := taskMap[roots[j]]
+		// First by priority (lower is higher priority)
+		if ti.Priority != tj.Priority {
+			return ti.Priority < tj.Priority
+		}
+		// Then by status
 		si := computeTaskStatus(ti, taskMap)
 		sj := computeTaskStatus(tj, taskMap)
-		priority := map[ComputedStatus]int{StatusReady: 0, StatusInProgress: 1, StatusBlocked: 2, StatusCompleted: 3}
-		return priority[si] < priority[sj]
+		statusOrder := map[ComputedStatus]int{StatusReady: 0, StatusInProgress: 1, StatusBlocked: 2, StatusCompleted: 3}
+		return statusOrder[si] < statusOrder[sj]
 	})
 
 	// Print tree recursively
@@ -627,6 +632,22 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 			indicator = dim("✓")
 		}
 
+		// Priority badge (only show if non-default P2)
+		priorityBadge := ""
+		if t.Priority != 2 {
+			priorityBadge = " " + formatPriorityBadge(t.Priority)
+		}
+
+		// Type badge (only show if non-default task)
+		typeBadge := ""
+		taskTypeVal := t.Type
+		if taskTypeVal == "" {
+			taskTypeVal = "task"
+		}
+		if taskTypeVal != "task" {
+			typeBadge = " " + formatTypeBadge(taskTypeVal)
+		}
+
 		// Feature tag
 		featureTag := ""
 		if t.Feature != "" && featureFilter == "" {
@@ -634,16 +655,16 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		}
 
 		if isRoot {
-			fmt.Printf("%s %s%s\n", indicator, t.Name, featureTag)
+			fmt.Printf("%s%s%s %s%s\n", indicator, priorityBadge, typeBadge, t.Name, featureTag)
 		} else {
 			connector := "├── "
 			if isLast {
 				connector = "└── "
 			}
-			fmt.Printf("%s%s%s %s%s\n", prefix, connector, indicator, t.Name, featureTag)
+			fmt.Printf("%s%s%s%s%s %s%s\n", prefix, connector, indicator, priorityBadge, typeBadge, t.Name, featureTag)
 		}
 
-		// Get children and sort them
+		// Get children and sort them by priority then status
 		kids := children[name]
 		sort.SliceStable(kids, func(i, j int) bool {
 			ti := taskMap[kids[i]]
@@ -651,10 +672,15 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 			if ti == nil || tj == nil {
 				return false
 			}
+			// First by priority (lower is higher priority)
+			if ti.Priority != tj.Priority {
+				return ti.Priority < tj.Priority
+			}
+			// Then by status
 			si := computeTaskStatus(ti, taskMap)
 			sj := computeTaskStatus(tj, taskMap)
-			priority := map[ComputedStatus]int{StatusReady: 0, StatusInProgress: 1, StatusBlocked: 2, StatusCompleted: 3}
-			return priority[si] < priority[sj]
+			statusOrder := map[ComputedStatus]int{StatusReady: 0, StatusInProgress: 1, StatusBlocked: 2, StatusCompleted: 3}
+			return statusOrder[si] < statusOrder[sj]
 		})
 
 		// Child prefix
