@@ -229,6 +229,20 @@ Examples:
 var taskEditPriority int = -1 // -1 means not set
 var taskEditType string
 
+var taskCleanCmd = &cobra.Command{
+	Use:   "clean",
+	Short: "Delete all completed tasks",
+	Long: `Delete all completed tasks for the current project.
+
+This permanently removes all tasks with status "completed".
+Use --force to skip the confirmation prompt.
+
+Examples:
+  agmd task clean                # Delete completed tasks (with confirmation)
+  agmd task clean --force        # Skip confirmation`,
+	RunE: runTaskClean,
+}
+
 var taskEditCmd = &cobra.Command{
 	Use:   "edit <task-name>",
 	Short: "Edit task priority or type",
@@ -253,6 +267,7 @@ func init() {
 	taskCmd.AddCommand(taskShowCmd)
 	taskCmd.AddCommand(taskDeleteCmd)
 	taskCmd.AddCommand(taskStatusCmd)
+	taskCmd.AddCommand(taskCleanCmd)
 	taskCmd.AddCommand(taskBlockedByCmd)
 	taskCmd.AddCommand(taskUnblockCmd)
 	taskCmd.AddCommand(taskEditCmd)
@@ -296,6 +311,9 @@ func init() {
 	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
 	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
+
+	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskCleanCmd.Flags().BoolVarP(&taskForce, "force", "f", false, "Skip confirmation prompt")
 }
 
 // getProjectName returns the project name (from flag or cwd)
@@ -539,51 +557,53 @@ func parsePriority(s string) (int, error) {
 	return 0, fmt.Errorf("invalid priority '%s'. Use 0-4 or P0-P4", s)
 }
 
-// formatPriorityBadge returns a colored priority badge
-func formatPriorityBadge(priority int) string {
+// formatPriorityType returns a colored "P0:bug" style tag
+// Only shows non-default values (P2 and task are defaults)
+func formatPriorityType(priority int, taskType string) string {
 	red := color.New(color.FgRed, color.Bold).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
-	white := color.New(color.FgWhite).SprintFunc()
 	dim := color.New(color.Faint).SprintFunc()
-
-	switch priority {
-	case 0:
-		return red("[P0]")
-	case 1:
-		return yellow("[P1]")
-	case 2:
-		return white("[P2]")
-	case 3:
-		return dim("[P3]")
-	case 4:
-		return dim("[P4]")
-	default:
-		return ""
-	}
-}
-
-// formatTypeBadge returns a colored type badge
-func formatTypeBadge(taskType string) string {
-	red := color.New(color.FgRed).SprintFunc()
 	magenta := color.New(color.FgMagenta).SprintFunc()
-	cyan := color.New(color.FgCyan).SprintFunc()
-	dim := color.New(color.Faint).SprintFunc()
 
+	// Normalize type
 	if taskType == "" {
 		taskType = "task"
 	}
 
-	switch taskType {
-	case "bug":
-		return red("[bug]")
-	case "feature":
-		return magenta("[feature]")
-	case "task":
-		return cyan("[task]")
-	case "chore":
-		return dim("[chore]")
+	// Check what's non-default
+	hasPriority := priority != 2
+	hasType := taskType != "task"
+
+	if !hasPriority && !hasType {
+		return ""
+	}
+
+	// Build the tag
+	var tag string
+	if hasPriority && hasType {
+		tag = fmt.Sprintf("P%d:%s", priority, taskType)
+	} else if hasPriority {
+		tag = fmt.Sprintf("P%d", priority)
+	} else {
+		tag = taskType
+	}
+
+	// Color based on priority (or type if no priority)
+	switch {
+	case priority == 0:
+		return red(tag)
+	case priority == 1:
+		return yellow(tag)
+	case priority == 3 || priority == 4:
+		return dim(tag)
+	case taskType == "bug":
+		return red(tag)
+	case taskType == "feature":
+		return magenta(tag)
+	case taskType == "chore":
+		return dim(tag)
 	default:
-		return dim("[" + taskType + "]")
+		return tag
 	}
 }
 
@@ -661,20 +681,10 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 			indicator = dim("✓")
 		}
 
-		// Priority badge (only show if non-default P2)
-		priorityBadge := ""
-		if t.Priority != 2 {
-			priorityBadge = " " + formatPriorityBadge(t.Priority)
-		}
-
-		// Type badge (only show if non-default task)
-		typeBadge := ""
-		taskTypeVal := t.Type
-		if taskTypeVal == "" {
-			taskTypeVal = "task"
-		}
-		if taskTypeVal != "task" {
-			typeBadge = " " + formatTypeBadge(taskTypeVal)
+		// Priority:type tag (e.g., "P0:bug", "P1", "chore")
+		prioType := formatPriorityType(t.Priority, t.Type)
+		if prioType != "" {
+			prioType = " " + prioType
 		}
 
 		// Feature tag
@@ -684,13 +694,13 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		}
 
 		if isRoot {
-			fmt.Printf("%s%s%s %s%s\n", indicator, priorityBadge, typeBadge, t.Name, featureTag)
+			fmt.Printf("%s%s %s%s\n", indicator, prioType, t.Name, featureTag)
 		} else {
 			connector := "├── "
 			if isLast {
 				connector = "└── "
 			}
-			fmt.Printf("%s%s%s%s%s %s%s\n", prefix, connector, indicator, priorityBadge, typeBadge, t.Name, featureTag)
+			fmt.Printf("%s%s%s%s %s%s\n", prefix, connector, indicator, prioType, t.Name, featureTag)
 		}
 
 		// Get children and sort them by priority then status
@@ -896,23 +906,13 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		case StatusBlocked:
 			statusBadge = red("[blocked]")
 		case StatusCompleted:
-			statusBadge = dim("[completed] ✓")
+			statusBadge = dim("[completed]") + " ✓"
 		}
 
-		// Priority badge (only show if non-default P2)
-		priorityBadge := ""
-		if t.Priority != 2 {
-			priorityBadge = " " + formatPriorityBadge(t.Priority)
-		}
-
-		// Type badge (only show if non-default task)
-		typeBadge := ""
-		taskTypeVal := t.Type
-		if taskTypeVal == "" {
-			taskTypeVal = "task"
-		}
-		if taskTypeVal != "task" {
-			typeBadge = " " + formatTypeBadge(taskTypeVal)
+		// Priority:type tag (e.g., "P0:bug", "P1", "chore")
+		prioType := formatPriorityType(t.Priority, t.Type)
+		if prioType != "" {
+			prioType = " " + prioType
 		}
 
 		// Show feature tag when not filtering by feature
@@ -921,7 +921,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 			featureTag = " " + dim("("+t.Feature+")")
 		}
 
-		fmt.Printf("%s%s%s %s%s\n", statusBadge, priorityBadge, typeBadge, t.Name, featureTag)
+		fmt.Printf("%s%s %s%s\n", statusBadge, prioType, t.Name, featureTag)
 
 		// Subject (if different from name)
 		if t.Subject != "" && t.Subject != strings.Title(strings.ReplaceAll(t.Name, "-", " ")) {
@@ -1218,6 +1218,85 @@ func runTaskShowAll(reg *registry.Registry) error {
 		if i < len(sorted)-1 {
 			fmt.Println()
 		}
+	}
+
+	return nil
+}
+
+func runTaskClean(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+
+	reg, err := registry.New()
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+
+	if !reg.Exists() {
+		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
+	}
+
+	projectName, err := getProjectName()
+	if err != nil {
+		return err
+	}
+
+	tasks, err := loadProjectTasks(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load tasks: %w", err)
+	}
+
+	// Find completed tasks
+	var completedTasks []*Task
+	for _, t := range tasks {
+		if t.Status == "completed" {
+			completedTasks = append(completedTasks, t)
+		}
+	}
+
+	if len(completedTasks) == 0 {
+		fmt.Printf("%s No completed tasks to clean in project '%s'\n", yellow("!"), projectName)
+		return nil
+	}
+
+	// Show what will be deleted
+	fmt.Printf("Found %d completed task(s) to delete:\n", len(completedTasks))
+	for _, t := range completedTasks {
+		fmt.Printf("  - %s\n", t.Name)
+	}
+
+	// Confirmation prompt (unless --force)
+	if !taskForce {
+		fmt.Printf("\n%s This will permanently delete these tasks.\n", yellow("⚠"))
+		fmt.Print("\nAre you sure? (y/N): ")
+
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
+
+		if response != "y" && response != "yes" {
+			fmt.Println("\nCancelled.")
+			return nil
+		}
+	}
+
+	// Delete the tasks
+	deleted := 0
+	for _, t := range completedTasks {
+		if err := os.Remove(t.FilePath); err != nil {
+			fmt.Printf("  Failed to delete %s: %v\n", t.Name, err)
+		} else {
+			deleted++
+		}
+	}
+
+	fmt.Printf("%s Deleted %d completed task(s)\n", green("✓"), deleted)
+
+	// Clean up empty project directory
+	taskDir := getTaskDir(reg, projectName)
+	entries, err := os.ReadDir(taskDir)
+	if err == nil && len(entries) == 0 {
+		os.Remove(taskDir)
 	}
 
 	return nil
