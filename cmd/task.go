@@ -746,6 +746,131 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		green("●"), blue("●"), red("●"), dim("✓"))
 }
 
+// printTasksGroupedByFeature prints tasks grouped by feature
+func printTasksGroupedByFeature(tasks []*Task, taskMap map[string]*Task, showAll bool,
+	green, blue, red, yellow, dim func(a ...interface{}) string) {
+
+	// Group tasks by feature
+	featureGroups := make(map[string][]*Task)
+	var featureOrder []string
+	seenFeatures := make(map[string]bool)
+
+	for _, t := range tasks {
+		feature := t.Feature
+		if feature == "" {
+			feature = "" // empty string for no feature
+		}
+		if !seenFeatures[feature] {
+			seenFeatures[feature] = true
+			featureOrder = append(featureOrder, feature)
+		}
+		featureGroups[feature] = append(featureGroups[feature], t)
+	}
+
+	// Sort feature order: non-empty features first (alphabetically), then empty
+	sort.SliceStable(featureOrder, func(i, j int) bool {
+		if featureOrder[i] == "" && featureOrder[j] != "" {
+			return false
+		}
+		if featureOrder[i] != "" && featureOrder[j] == "" {
+			return true
+		}
+		return featureOrder[i] < featureOrder[j]
+	})
+
+	// Print each feature group
+	for _, feature := range featureOrder {
+		groupTasks := featureGroups[feature]
+
+		// Count active tasks in this group
+		activeInGroup := 0
+		for _, t := range groupTasks {
+			status := computeTaskStatus(t, taskMap)
+			if status != StatusCompleted {
+				activeInGroup++
+			}
+		}
+
+		// Skip empty groups (all completed and not showing all)
+		if activeInGroup == 0 && !showAll {
+			continue
+		}
+
+		// Print feature header
+		if feature != "" {
+			fmt.Printf("%s\n", yellow(feature+"/"))
+		} else {
+			// Only print header if there are also feature groups
+			hasFeatureGroups := false
+			for _, f := range featureOrder {
+				if f != "" {
+					hasFeatureGroups = true
+					break
+				}
+			}
+			if hasFeatureGroups {
+				fmt.Printf("%s\n", dim("(no feature)"))
+			}
+		}
+
+		// Print tasks in this group
+		for _, t := range groupTasks {
+			status := computeTaskStatus(t, taskMap)
+
+			// Skip completed unless --all
+			if status == StatusCompleted && !showAll {
+				continue
+			}
+
+			// Status badge
+			var statusBadge string
+			switch status {
+			case StatusReady:
+				statusBadge = green("[ready]")
+			case StatusInProgress:
+				statusBadge = blue("[in_progress]")
+			case StatusBlocked:
+				statusBadge = red("[blocked]")
+			case StatusCompleted:
+				statusBadge = dim("[completed]") + " ✓"
+			}
+
+			// Priority:type tag
+			prioType := formatPriorityType(t.Priority, t.Type)
+			if prioType != "" {
+				prioType = " " + prioType
+			}
+
+			// Indent if under a feature group
+			indent := ""
+			if feature != "" || len(featureOrder) > 1 {
+				indent = "  "
+			}
+
+			fmt.Printf("%s%s%s %s\n", indent, statusBadge, prioType, t.Name)
+
+			// Content preview (first line)
+			if t.Content != "" {
+				lines := strings.SplitN(t.Content, "\n", 2)
+				preview := strings.TrimSpace(lines[0])
+				if preview != "" {
+					fmt.Printf("%s  %s\n", indent, dim(preview))
+				}
+			}
+
+			// Pending dependencies
+			if status == StatusBlocked {
+				pending := getPendingDependencies(t, taskMap)
+				if len(pending) > 0 {
+					fmt.Printf("%s  %s waiting: %s\n", indent, yellow("↳"), strings.Join(pending, ", "))
+				}
+			}
+		}
+
+		fmt.Println()
+	}
+}
+
 // --- Subcommand implementations ---
 
 func runTaskList(cmd *cobra.Command, args []string) error {
@@ -887,7 +1012,13 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Print tasks
+	// Group tasks by feature (only when not filtering by feature)
+	if taskFeature == "" {
+		printTasksGroupedByFeature(sorted, taskMap, taskAll, green, blue, red, yellow, dim)
+		return nil
+	}
+
+	// Print tasks (when filtering by feature - no grouping needed)
 	for _, t := range sorted {
 		status := computeTaskStatus(t, taskMap)
 
@@ -915,13 +1046,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 			prioType = " " + prioType
 		}
 
-		// Show feature tag when not filtering by feature
-		featureTag := ""
-		if t.Feature != "" && taskFeature == "" {
-			featureTag = " " + dim("("+t.Feature+")")
-		}
-
-		fmt.Printf("%s%s %s%s\n", statusBadge, prioType, t.Name, featureTag)
+		fmt.Printf("%s%s %s\n", statusBadge, prioType, t.Name)
 
 		// Subject (if different from name)
 		if t.Subject != "" && t.Subject != strings.Title(strings.ReplaceAll(t.Name, "-", " ")) {
