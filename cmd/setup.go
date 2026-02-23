@@ -59,10 +59,13 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%s Registry ready!\n", green("ok"))
+	fmt.Println("\nBundled:")
+	fmt.Println("  guide:agmd       — quick reference for AI agents")
+	fmt.Println("  skill:agmd-migrate — step-by-step migration guide for AI agents")
 	fmt.Println("\nNext steps:")
-	fmt.Println("  agmd init              # Create directives.md in a project")
-	fmt.Println("  agmd new type:name     # Create a reusable item")
-	fmt.Println("  agmd list              # See your registry")
+	fmt.Println("  agmd migrate CLAUDE.md        # Migrate existing AI instructions → directives.md")
+	fmt.Println("  agmd init                     # Start fresh in a new project")
+	fmt.Println("  agmd skill link agmd-migrate  # Link the migration skill to your agent dirs")
 
 	return nil
 }

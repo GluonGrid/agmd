@@ -28,6 +28,11 @@ func (r *Registry) Setup(force bool) error {
 		return fmt.Errorf("failed to create default guide: %w", err)
 	}
 
+	// Create bundled agmd-migrate skill
+	if err := r.createDefaultMigrateSkill(); err != nil {
+		return fmt.Errorf("failed to create agmd-migrate skill: %w", err)
+	}
+
 	return nil
 }
 
@@ -50,12 +55,20 @@ func (r *Registry) createDefaultProfile() error {
 
 // createDefaultGuide creates the guide/agmd.md file
 func (r *Registry) createDefaultGuide() error {
-	// Ensure guide directory exists
 	guideDir := filepath.Join(r.BasePath, "guide")
 	if err := os.MkdirAll(guideDir, 0755); err != nil {
 		return err
 	}
-
 	guidePath := filepath.Join(guideDir, "agmd.md")
 	return os.WriteFile(guidePath, []byte(GetAgmdGuideTemplate()), 0644)
+}
+
+// createDefaultMigrateSkill creates the bundled agmd-migrate skill
+func (r *Registry) createDefaultMigrateSkill() error {
+	skillDir := filepath.Join(r.BasePath, "skill", "agmd-migrate")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return err
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	return os.WriteFile(skillPath, []byte(GetAgmdMigrateSkillTemplate()), 0644)
 }

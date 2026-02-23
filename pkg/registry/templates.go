@@ -50,6 +50,10 @@ workflow:commit
 :::new type:name         # Define inline content (promote to registry later)
 content here...
 :::end
+:::docs                  # List symlinked documentation in ./docs/
+:::docs ./reference      # List symlinked documentation in custom path
+:::skills                # Inject <available_skills> XML (auto-detect .claude/ or .agents/)
+:::skills .claude/skills # Explicit path
 ` + "```" + `
 
 ### Commands for AI Assistants
@@ -58,42 +62,146 @@ content here...
 # Read content (no editor)
 agmd show type:name              # Display item content
 agmd show type:name --raw        # Include frontmatter
+agmd file show script.sh         # Show raw file content
+agmd doc show my-docs            # Show documentation folder contents
 
 # Create items (no editor)
 agmd new type:name --no-editor
 agmd new type:name --content "# Content here"
+agmd new type:name --local       # Create in project-local .agmd/ (team-shared)
 echo "Content" | agmd new type:name
+agmd file new script.sh --content "#!/bin/bash"
 
 # Update items (no editor)
 agmd edit type:name --content "# New content"
 echo "Content" | agmd edit type:name
 
+# Move items between registries
+agmd mv rule:my-rule --to-global  # local → global
+agmd mv rule:my-rule --to-local   # global → local
+
 # Other commands
 agmd sync                        # Generate AGENTS.md from directives.md
-agmd list                        # List all registry items
-agmd ls                          # Alias for list
+agmd list                        # List all registry items (local + global annotated)
 agmd promote --all               # Promote all :::new blocks to registry
+
+# Migrating existing projects
+agmd migrate CLAUDE.md           # Migrate raw/unstructured file → directives.md
+agmd migrate CLAUDE.md --force   # Overwrite existing directives.md
+agmd collect                     # Collect rules from agmd project into ~/.agmd/
+agmd collect -f CLAUDE.md        # Collect from a specific output file
+
+# Symlinking output to AI-specific files
+agmd symlink                     # Interactive: choose target (CLAUDE.md, .cursorrules, etc.)
+agmd symlink --target claude     # Symlink AGENTS.md → CLAUDE.md
+agmd symlink --target cursor     # Symlink AGENTS.md → .cursorrules
+agmd symlink --list              # Show available symlink targets
+
+# Task management
+agmd task list                   # List tasks for current project
+agmd task list --tree            # Tree view grouped by feature
+agmd task list --type bug --priority 0   # Filter: critical bugs only
+agmd task list --feature auth    # Filter by feature
+agmd task list --status ready    # Filter by status
+agmd task new setup-db --content "Set up database"
+agmd task new fix-auth -t bug -p 0 --feature auth --content "Critical auth bug"
+agmd task new api --blocked-by setup-db  # With dependency
+agmd task status setup-db completed
+agmd task edit setup-db --priority 1 --type feature
+agmd task blocked-by api setup-db   # Add dependency
+agmd task unblock api setup-db      # Remove dependency
+agmd task clean                  # Delete all completed tasks
+agmd task show --all             # Show all tasks with content
+
+# File management (raw files without markdown processing)
+agmd file list                   # List all files
+agmd file add ./script.sh        # Add existing file to registry
+agmd file delete script.sh       # Delete file
+
+# Documentation folders (symlinked into projects)
+agmd doc list                    # List all documentation
+agmd doc add ./docs my-docs      # Add docs folder to registry
+agmd doc link my-docs            # Symlink into project as docs/my-docs
+agmd doc unlink my-docs          # Remove symlink
+
+# Agent Skills (https://agentskills.io)
+agmd skill install owner/repo    # Install skill from GitHub
+agmd skill install owner/repo/subdir --name my-skill
+agmd skill list                  # List installed skills (local/global annotated)
+agmd skill show my-skill         # Show SKILL.md content
+agmd skill link my-skill         # Symlink into .claude/skills/ or .agents/skills/
+agmd skill link my-skill --target both  # Link into both
+agmd skill unlink my-skill       # Remove symlinks
+agmd skill update my-skill       # Re-fetch latest version
+agmd skill delete my-skill       # Remove from registry
+
+# Registry git (runs git in ~/.agmd, from anywhere)
+agmd git init
+agmd git remote add origin <url>
+agmd git add -A && agmd git commit -m "sync" && agmd git push
+agmd git pull
+agmd git status
+agmd git log --oneline
+
+# Local registry (project-scoped, team-shared via git)
+agmd init --local                # Create .agmd/ in project root
+agmd new rule:my-rule --local    # Create item in local registry (overrides global)
 ` + "```" + `
 
-### Task Management
+### Migration: Existing Projects
+
+| Command | Use when | Result |
+|---------|----------|--------|
+` + "|" + ` ` + "`agmd migrate <file>`" + ` | Project has raw/unstructured AI instructions | Content → ` + "`directives.md`" + ` (wrap sections with ` + "`:::new`" + `, then promote) |
+` + "|" + ` ` + "`agmd collect`" + ` | Project already uses agmd (has ` + "`directives.md`" + `) | Registry items → ` + "`~/.agmd/`" + ` for reuse |
+
+Quick migration flow:
+` + "```" + `bash
+agmd migrate CLAUDE.md   # creates directives.md, opens editor
+# wrap sections with :::new ... :::end in editor, then:
+agmd promote --all       # saves :::new blocks to ~/.agmd/
+agmd sync                # generates AGENTS.md
+agmd symlink --target claude  # symlink AGENTS.md → CLAUDE.md (if needed)
+` + "```" + `
+
+The built-in ` + "`agmd-migrate`" + ` skill provides detailed step-by-step guidance. Link it with:
+` + "```" + `bash
+agmd skill link agmd-migrate
+` + "```" + `
+
+### Symlinking Output
+
+agmd always generates ` + "`AGENTS.md`" + `. To use the output with tools that expect a different filename:
 
 ` + "```" + `bash
-# All task operations use: agmd task <action>
-agmd task list                                   # List tasks (auto-sorted)
-agmd task list --feature auth                    # Filter by feature
-agmd task list --status ready                    # Filter by status (ready/blocked/in_progress/completed)
-agmd task list --tree                            # Show dependency tree
-agmd task list --all                             # Include completed tasks
-agmd task new setup-db --content "Description"   # Create task
-agmd task new setup-db --feature auth            # Scoped to feature
-agmd task new api --blocked-by "setup-db"        # With dependency (validated)
-agmd task show setup-db                          # Show single task
-agmd task show --all                             # Show all tasks
-agmd task delete setup-db --force                # Delete task
-agmd task status setup-db completed              # Update status
-agmd task blocked-by api setup-db                # Add dependency
-agmd task unblock api setup-db                   # Remove dependency
+agmd symlink --target claude   # AGENTS.md → CLAUDE.md  (for Claude Code)
+agmd symlink --target cursor   # AGENTS.md → .cursorrules (for Cursor)
+agmd symlink --target windsurf # AGENTS.md → .windsurfrules (for Windsurf)
+agmd symlink --list            # See all available targets
 ` + "```" + `
+
+### Registry Resolution Order
+
+When looking up items (e.g. ` + "`:::use rule:foo`" + `):
+
+1. ` + "`.agmd/rule/foo.md`" + ` — project-local (committed to project git, team-shared)
+2. ` + "`~/.agmd/rule/foo.md`" + ` — global (personal, synced via ` + "`agmd git`" + `)
+
+### Personal Overrides
+
+Create ` + "`directives.local.md`" + ` alongside ` + "`directives.md`" + ` for machine-specific or personal
+directives that should not be committed. It is automatically appended to ` + "`directives.md`" + `
+during ` + "`agmd sync`" + ` and is added to ` + "`.gitignore`" + ` by ` + "`agmd init`" + `.
+
+### Reserved Types
+
+Some types have special subcommands:
+
+- ` + "`task`" + ` - Project tasks with dependencies, priority (P0-P4), type (bug/feature/task/chore)
+- ` + "`file`" + ` - Raw files without frontmatter (` + "`agmd file ...`" + `)
+- ` + "`doc`" + ` - Documentation folders, symlinked (` + "`agmd doc ...`" + `)
+- ` + "`skill`" + ` - Agent Skills from GitHub (` + "`agmd skill ...`" + `)
+- ` + "`profile`" + ` - Project templates (` + "`agmd init profile:name`" + `)
 
 ### Important
 
@@ -101,7 +209,195 @@ agmd task unblock api setup-db                   # Remove dependency
 - Run ` + "`agmd sync`" + ` after changes to regenerate AGENTS.md
 - Use ` + "`:::new`" + ` for project-specific content, then ` + "`agmd promote`" + ` to reuse elsewhere
 - Types are flexible: use rule, workflow, prompt, guide, or any custom type
-- Reserved types (task, doc, file) use resource-first subcommands (e.g., ` + "`agmd task list`" + `)
+- Reserved types (task, file, doc, skill) use their own subcommands, not generic commands
+- Commit ` + "`.agmd/`" + ` to share project rules with teammates
 - Create ` + "`directives.local.md`" + ` for personal/machine-specific directives (gitignored, merged at sync)
+`
+}
+
+// GetAgmdMigrateSkillTemplate returns the SKILL.md for the bundled agmd-migrate skill
+func GetAgmdMigrateSkillTemplate() string {
+	return `---
+name: agmd-migrate
+description: "Help users migrate existing AI instruction files (CLAUDE.md, AGENTS.md, .cursorrules, etc.) to agmd format (directives.md)"
+license: MIT
+compatibility: claude, cursor, windsurf, any
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+---
+
+## agmd Migration Skill
+
+You are helping the user migrate their existing AI instruction files to **agmd** format.
+
+### What is agmd?
+
+agmd is a CLI tool that manages AI agent instructions via a personal registry (` + "`~/.agmd/`" + `) and a per-project ` + "`directives.md`" + ` source file that expands to a full ` + "`AGENTS.md`" + ` for AI agents.
+
+### Migration Workflow
+
+#### Step 1 — Check if agmd is installed
+
+` + "```" + `bash
+agmd --version
+` + "```" + `
+
+If not installed:
+` + "```" + `bash
+curl -fsSL https://gluongrid.dev/agmd/install.sh | bash
+agmd setup
+` + "```" + `
+
+#### Step 2 — Identify existing instruction files
+
+Look for any of these in the project root:
+- ` + "`CLAUDE.md`" + ` / ` + "`claude.md`" + `
+- ` + "`AGENTS.md`" + ` / ` + "`agents.md`" + `
+- ` + "`.cursorrules`" + `
+- ` + "`.windsurfrules`" + `
+- ` + "`.github/copilot-instructions.md`" + `
+- Any other AI instruction file
+
+#### Step 3 — Run agmd migrate
+
+` + "```" + `bash
+# For unstructured files (no agmd directives yet) — most common case
+agmd migrate CLAUDE.md
+
+# Force overwrite if directives.md already exists
+agmd migrate CLAUDE.md --force
+` + "```" + `
+
+This command:
+1. Creates a backup (` + "`CLAUDE.md.backup`" + `)
+2. Copies content to ` + "`directives.md`" + ` with a guide header (` + "`:::use guide:agmd`" + `)
+3. Opens editor to let you wrap sections with ` + "`:::new`" + ` markers
+
+#### Step 4 — Wrap reusable sections with :::new
+
+In the editor, identify sections worth saving to the registry and wrap them:
+
+` + "```" + `markdown
+:::new rule:typescript
+# TypeScript Standards
+Use strict mode. Prefer ` + "`unknown`" + ` over ` + "`any`" + `.
+:::end
+
+:::new workflow:commit
+# Commit Process
+Always run tests before committing.
+:::end
+` + "```" + `
+
+Leave project-specific content (setup notes, architecture docs) unwrapped — it stays as-is in ` + "`directives.md`" + `.
+
+#### Step 5 — Promote to registry
+
+` + "```" + `bash
+agmd promote --all
+` + "```" + `
+
+This extracts each ` + "`:::new`" + ` block, saves it to ` + "`~/.agmd/`" + `, and replaces it with ` + "`:::use type:name`" + `.
+
+#### Step 6 — Sync to generate output
+
+` + "```" + `bash
+agmd sync
+` + "```" + `
+
+This generates ` + "`AGENTS.md`" + ` from the expanded directives.
+
+#### Step 7 — Symlink to your AI tool's expected filename
+
+agmd always outputs ` + "`AGENTS.md`" + `. If your AI tool expects a different filename, symlink it:
+
+` + "```" + `bash
+agmd symlink --target claude   # AGENTS.md → CLAUDE.md  (Claude Code)
+agmd symlink --target cursor   # AGENTS.md → .cursorrules (Cursor)
+agmd symlink --target windsurf # AGENTS.md → .windsurfrules (Windsurf)
+agmd symlink --list            # See all available targets
+` + "```" + `
+
+This is especially important when migrating from a non-AGENTS.md file — after migration, your original file (e.g. ` + "`CLAUDE.md`" + `) can be replaced by the symlink so nothing breaks for teammates.
+
+#### Step 8 — Collect from an existing agmd project (alternative)
+
+If the project already uses agmd (has ` + "`directives.md`" + ` with ` + "`:::use`" + ` directives):
+
+` + "```" + `bash
+agmd collect              # extracts items from AGENTS.md into ~/.agmd/
+agmd collect -f CLAUDE.md # collect from a different output file
+` + "```" + `
+
+### Key Concepts
+
+| Concept | Explanation |
+|---------|-------------|
+` + "|" + ` ` + "`directives.md`" + ` | Source file — short, readable, contains ` + "`:::use`" + ` directives. **Edit this.** |
+` + "|" + ` ` + "`AGENTS.md`" + ` | Generated output — full expanded content for AI agents. **Don't edit.** |
+` + "|" + ` ` + "`~/.agmd/`" + ` | Global registry — your personal reusable rules, workflows, guides |
+` + "|" + ` ` + "`.agmd/`" + ` | Local registry — project-specific rules, committed with team |
+` + "|" + ` ` + "`directives.local.md`" + ` | Personal overrides — gitignored, merged at sync time |
+
+### Directive Syntax Quick Reference
+
+` + "```" + `markdown
+:::use rule:typescript        # single item from registry
+:::list                       # multiple items, mixed types
+rule:eslint
+workflow:commit
+:::end
+:::new rule:my-rule           # define inline (promote later)
+content...
+:::end
+:::skills                     # inject <available_skills> XML block
+:::docs                       # list symlinked documentation
+` + "```" + `
+
+### Common Migration Patterns
+
+**Pattern 1: Monolithic CLAUDE.md → split into registry items**
+` + "```" + `bash
+agmd migrate CLAUDE.md        # wrap sections with :::new in editor
+agmd promote --all            # save to ~/.agmd/
+agmd sync                     # generate AGENTS.md
+agmd symlink --target claude  # symlink AGENTS.md → CLAUDE.md
+` + "```" + `
+
+**Pattern 2: Project already has AGENTS.md from agmd**
+` + "```" + `bash
+agmd collect      # pull items into your ~/.agmd/
+` + "```" + `
+
+**Pattern 3: Fresh project, start from scratch**
+` + "```" + `bash
+agmd init         # creates directives.md from default profile
+agmd edit         # add :::use directives
+agmd sync         # generate AGENTS.md
+agmd symlink --target claude  # if using Claude Code
+` + "```" + `
+
+**Pattern 4: Personal rules that shouldn't be committed**
+` + "```" + `bash
+echo ":::use rule:my-personal-rule" >> directives.local.md
+agmd sync         # merges both files automatically
+` + "```" + `
+
+### After Migration
+
+` + "```" + `bash
+agmd list                         # view your registry
+agmd show rule:typescript         # inspect a rule
+
+# Reuse in another project
+cd ~/other-project
+agmd init
+agmd edit    # add :::use rule:typescript etc.
+agmd sync
+agmd symlink --target claude
+
+# Keep registry synced across machines
+agmd git remote add origin <your-git-url>
+agmd git add -A && agmd git commit -m "sync" && agmd git push
+` + "```" + `
 `
 }
