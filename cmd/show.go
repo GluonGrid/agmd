@@ -18,15 +18,18 @@ var showCmd = &cobra.Command{
 	Long: `Display the content of a registry item (like cat).
 
 Useful for AI assistants to read item content without opening an editor.
-
-For tasks, use the task subcommand:
-  agmd task show setup-db
+Reserved types (task, file, doc) have their own subcommands.
 
 Examples:
   agmd show rule:typescript        # Show rule content
   agmd show workflow:commit        # Show workflow content
   agmd show guide:agmd             # Show guide content
-  agmd show rule:typescript --raw  # Include frontmatter`,
+  agmd show rule:typescript --raw  # Include frontmatter
+
+Reserved types with subcommands:
+  agmd task show setup-db          # Show project task
+  agmd file show script.sh         # Show raw file
+  agmd doc show my-docs            # Show documentation folder`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTypeName,
 	RunE:              runShow,

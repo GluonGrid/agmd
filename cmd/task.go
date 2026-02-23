@@ -613,6 +613,7 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 	blue := color.New(color.FgBlue).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
 	dim := color.New(color.Faint).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
 
 	// Find root tasks (tasks with no dependencies or whose deps are all outside the displayed set)
 	taskSet := make(map[string]bool)
@@ -622,7 +623,7 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 
 	// Build children map (reverse of depends_on)
 	children := make(map[string][]string)
-	roots := []string{}
+	rootSet := make(map[string]bool)
 	for _, t := range tasks {
 		isRoot := true
 		for _, dep := range t.DependsOn {
@@ -632,24 +633,26 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 			}
 		}
 		if isRoot {
-			roots = append(roots, t.Name)
+			rootSet[t.Name] = true
 		}
 	}
 
 	// Sort roots by priority first, then status
-	sort.SliceStable(roots, func(i, j int) bool {
-		ti := taskMap[roots[i]]
-		tj := taskMap[roots[j]]
-		// First by priority (lower is higher priority)
-		if ti.Priority != tj.Priority {
-			return ti.Priority < tj.Priority
-		}
-		// Then by status
-		si := computeTaskStatus(ti, taskMap)
-		sj := computeTaskStatus(tj, taskMap)
-		statusOrder := map[ComputedStatus]int{StatusReady: 0, StatusInProgress: 1, StatusBlocked: 2, StatusCompleted: 3}
-		return statusOrder[si] < statusOrder[sj]
-	})
+	sortRoots := func(roots []string) {
+		sort.SliceStable(roots, func(i, j int) bool {
+			ti := taskMap[roots[i]]
+			tj := taskMap[roots[j]]
+			// First by priority (lower is higher priority)
+			if ti.Priority != tj.Priority {
+				return ti.Priority < tj.Priority
+			}
+			// Then by status
+			si := computeTaskStatus(ti, taskMap)
+			sj := computeTaskStatus(tj, taskMap)
+			statusOrder := map[ComputedStatus]int{StatusReady: 0, StatusInProgress: 1, StatusBlocked: 2, StatusCompleted: 3}
+			return statusOrder[si] < statusOrder[sj]
+		})
+	}
 
 	// Print tree recursively
 	printed := make(map[string]bool)
@@ -687,20 +690,14 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 			prioType = " " + prioType
 		}
 
-		// Feature tag
-		featureTag := ""
-		if t.Feature != "" && featureFilter == "" {
-			featureTag = " " + dim("("+t.Feature+")")
-		}
-
 		if isRoot {
-			fmt.Printf("%s%s %s%s\n", indicator, prioType, t.Name, featureTag)
+			fmt.Printf("  %s%s %s\n", indicator, prioType, t.Name)
 		} else {
 			connector := "├── "
 			if isLast {
 				connector = "└── "
 			}
-			fmt.Printf("%s%s%s%s %s%s\n", prefix, connector, indicator, prioType, t.Name, featureTag)
+			fmt.Printf("  %s%s%s%s %s\n", prefix, connector, indicator, prioType, t.Name)
 		}
 
 		// Get children and sort them by priority then status
@@ -737,8 +734,93 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		}
 	}
 
-	for _, root := range roots {
-		printNode(root, "", false, true)
+	// Group ALL tasks by feature (not just roots)
+	featureGroups := make(map[string][]*Task)
+	var featureOrder []string
+	seenFeatures := make(map[string]bool)
+
+	for _, t := range tasks {
+		feature := t.Feature
+		// If feature filter is applied, skip grouping
+		if featureFilter != "" {
+			feature = featureFilter
+		}
+		if !seenFeatures[feature] {
+			seenFeatures[feature] = true
+			featureOrder = append(featureOrder, feature)
+		}
+		featureGroups[feature] = append(featureGroups[feature], t)
+	}
+
+	// Sort features: non-empty first (alphabetically), then empty
+	sort.SliceStable(featureOrder, func(i, j int) bool {
+		fi, fj := featureOrder[i], featureOrder[j]
+		if fi == "" && fj != "" {
+			return false
+		}
+		if fi != "" && fj == "" {
+			return true
+		}
+		return fi < fj
+	})
+
+	// Print each feature group
+	for i, feature := range featureOrder {
+		featureTasks := featureGroups[feature]
+
+		// Build local task set and children map for this feature
+		localTaskSet := make(map[string]bool)
+		for _, t := range featureTasks {
+			localTaskSet[t.Name] = true
+		}
+
+		// Find roots within this feature (tasks whose deps are outside this feature)
+		localChildren := make(map[string][]string)
+		var localRoots []string
+		for _, t := range featureTasks {
+			isLocalRoot := true
+			for _, dep := range t.DependsOn {
+				if localTaskSet[dep] {
+					localChildren[dep] = append(localChildren[dep], t.Name)
+					isLocalRoot = false
+				}
+			}
+			if isLocalRoot {
+				localRoots = append(localRoots, t.Name)
+			}
+		}
+
+		// Sort local roots
+		sortRoots(localRoots)
+
+		// Print feature header (skip if feature filter is applied)
+		if featureFilter == "" {
+			if feature != "" {
+				fmt.Printf("%s\n", yellow(feature+"/"))
+			} else {
+				fmt.Printf("%s\n", dim("(no feature)"))
+			}
+		}
+
+		// Override children map for local printing
+		oldChildren := children
+		children = localChildren
+
+		// Print trees for this feature
+		for _, root := range localRoots {
+			printNode(root, "", false, true)
+		}
+
+		// Restore children map
+		children = oldChildren
+
+		// Reset printed map for next feature group
+		printed = make(map[string]bool)
+
+		// Add spacing between feature groups
+		if i < len(featureOrder)-1 {
+			fmt.Println()
+		}
 	}
 
 	// Legend

@@ -22,9 +22,7 @@ var deleteCmd = &cobra.Command{
 
 This command removes items from the registry (~/.agmd/) permanently.
 A confirmation prompt will be shown unless --force is used.
-
-For tasks, use the task subcommand:
-  agmd task delete setup-db
+Reserved types (task, file, doc) have their own subcommands.
 
 Format:
   type:name   - Specify the type and name (e.g., rule:typescript)
@@ -33,7 +31,12 @@ Examples:
   agmd delete rule:typescript            # Delete a rule
   agmd rm workflow:old-workflow          # Delete a workflow (using alias)
   agmd del prompt:deprecated             # Delete a prompt (using alias)
-  agmd delete rule:frontend/old --force  # Delete without confirmation`,
+  agmd delete rule:frontend/old --force  # Delete without confirmation
+
+Reserved types with subcommands:
+  agmd task delete setup-db              # Delete project task
+  agmd file delete script.sh             # Delete raw file
+  agmd doc delete my-docs                # Delete documentation folder`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTypeName,
 	RunE:              runDelete,

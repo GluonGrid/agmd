@@ -21,8 +21,8 @@ var listCmd = &cobra.Command{
 	Short:   "List all registry items",
 	Long: `List all items in the registry organized by type.
 
-For tasks, use the task subcommand:
-  agmd task list
+This command lists user-defined types (rule, workflow, guideline, etc.).
+Reserved types (task, file, doc, profile) have their own subcommands.
 
 Examples:
   agmd list           # List all items
@@ -30,9 +30,10 @@ Examples:
   agmd ls             # Same (alias)
   agmd list --tree    # Show as ASCII tree
 
-For files, tasks, and docs use their subcommands:
-  agmd file list
-  agmd task list`,
+Reserved types with subcommands:
+  agmd task list      # List project tasks
+  agmd file list      # List raw files
+  agmd doc list       # List documentation folders`,
 	ValidArgsFunction: completeTypeOnly,
 	RunE:              runList,
 }

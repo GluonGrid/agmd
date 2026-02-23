@@ -103,8 +103,8 @@ func (g *Generator) ParseAndExpand(inputPath string) (string, error) {
 	// Strip frontmatter if present
 	content = stripFrontmatter(content)
 
-	// Use the parser to expand directives
-	expanded, err := parser.ParseAndExpand(content, g.Registry.BasePath)
+	// Use the parser to expand directives (local registry takes priority)
+	expanded, err := parser.ParseAndExpand(content, g.Registry.BasePath, g.Registry.LocalPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse and expand directives: %w", err)
 	}

@@ -25,9 +25,10 @@ type Profile struct {
 	FilePath    string
 }
 
-// Registry manages the ~/.agmd/ directory
+// Registry manages the ~/.agmd/ directory and optional project-local .agmd/
 type Registry struct {
-	BasePath string // ~/.agmd
+	BasePath  string // ~/.agmd (global)
+	LocalPath string // ./.agmd (project-local, empty if not present)
 }
 
 // IsRawType returns true for types that store files without .md extension and frontmatter

@@ -15,6 +15,7 @@ import (
 
 var newNoEditor bool
 var newContent string
+var newLocal bool
 
 var newCmd = &cobra.Command{
 	Use:   "new type:name",
@@ -22,15 +23,19 @@ var newCmd = &cobra.Command{
 	Long: `Create a new item in the registry and open it in your editor.
 
 The type can be anything - agmd will create the folder if needed.
+Reserved types (task, file, doc) have their own subcommands.
 
 Examples:
-  agmd new rule:typescript
-  agmd new framework:react
-  agmd new prompt:code-review
-  agmd new profile:svelte-kit
+  agmd new rule:typescript       # Create a rule (global ~/.agmd)
+  agmd new rule:typescript --local  # Create a rule (project-local .agmd/)
+  agmd new framework:react       # Create custom type
+  agmd new prompt:code-review    # Create another custom type
+  agmd new profile:svelte-kit    # Create profile from current directives.md
 
-For tasks, use the task subcommand:
-  agmd task new setup-db --content "Set up database"
+Reserved types with subcommands:
+  agmd task new setup-db         # Create project task
+  agmd file new script.sh        # Create raw file
+  agmd doc add ./docs my-docs    # Add documentation folder
 
 For AI assistants (non-interactive):
   agmd new rule:test --no-editor
@@ -44,6 +49,7 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolVar(&newNoEditor, "no-editor", false, "Don't open editor after creating")
 	newCmd.Flags().StringVar(&newContent, "content", "", "Content to write (skips editor)")
+	newCmd.Flags().BoolVar(&newLocal, "local", false, "Create in project-local .agmd/ instead of global ~/.agmd")
 }
 
 func runNew(cmd *cobra.Command, args []string) error {
@@ -78,13 +84,22 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
-	// Handle profile creation (special case)
+	// Handle profile creation (special case — always global)
 	if itemType == "profile" {
 		return createProfile(name, reg)
 	}
 
+	// Determine target base path
+	targetBase := reg.BasePath
+	if newLocal {
+		if reg.LocalPath == "" {
+			return fmt.Errorf("no local registry found\nRun 'agmd init --local' to create one in the current directory")
+		}
+		targetBase = reg.LocalPath
+	}
+
 	// Build path
-	filePath := filepath.Join(reg.BasePath, itemType, name+".md")
+	filePath := filepath.Join(targetBase, itemType, name+".md")
 
 	// Check if exists
 	if _, err := os.Stat(filePath); err == nil {
@@ -137,7 +152,11 @@ description: ""
 		return fmt.Errorf("failed to create file: %w", err)
 	}
 
-	fmt.Printf("%s Created %s:%s\n", green("ok"), itemType, name)
+	location := "global"
+	if newLocal {
+		location = "local"
+	}
+	fmt.Printf("%s Created %s:%s (%s)\n", green("ok"), itemType, name, location)
 
 	// Open editor unless --no-editor or content was provided
 	if newNoEditor || content != "" {

@@ -38,7 +38,18 @@ Benefits:
 Get started:
   agmd setup    # Initialize your registry
   agmd init     # Create directives.md in your project
-  agmd sync     # Generate AGENTS.md`,
+  agmd sync     # Generate AGENTS.md
+
+Special subcommands:
+  agmd task     # Manage project tasks with dependencies
+  agmd file     # Manage raw files (scripts, configs)
+  agmd doc      # Manage documentation folders
+
+Sync across devices:
+  agmd git init
+  agmd git remote add origin <url>
+  agmd git add -A && agmd git commit -m "sync" && agmd git push
+  git clone <url> ~/.agmd   # on a new machine`,
 	Version: "0.1.0",
 }
 

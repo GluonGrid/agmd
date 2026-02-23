@@ -20,13 +20,15 @@ type ItemMeta struct {
 
 // DirectiveTransformer expands directive blocks
 type DirectiveTransformer struct {
-	RegistryPath string
+	RegistryPath string // global ~/.agmd
+	LocalPath    string // project-local .agmd (optional, checked first)
 }
 
 // NewDirectiveTransformer creates a new transformer
-func NewDirectiveTransformer(registryPath string) parser.ASTTransformer {
+func NewDirectiveTransformer(registryPath, localPath string) parser.ASTTransformer {
 	return &DirectiveTransformer{
 		RegistryPath: registryPath,
+		LocalPath:    localPath,
 	}
 }
 
@@ -52,12 +54,9 @@ func (t *DirectiveTransformer) Transform(node *ast.Document, reader text.Reader,
 
 // expandListBlock expands a :::list block by loading registry files
 func (t *DirectiveTransformer) expandListBlock(listBlock *ListBlock, doc *ast.Document, reader text.Reader) {
-	// Use the ItemType to determine which registry folder to use
-	registryPath := filepath.Join(t.RegistryPath, listBlock.ItemType)
-
 	// Load each item file and insert content
 	for _, itemName := range listBlock.Names {
-		content, err := t.loadItemContent(registryPath, itemName)
+		content, err := t.loadItemContent(listBlock.ItemType, itemName)
 		if err != nil {
 			// Silently skip missing items - validation can catch this later
 			continue
@@ -71,18 +70,27 @@ func (t *DirectiveTransformer) expandListBlock(listBlock *ListBlock, doc *ast.Do
 	}
 }
 
-// loadItemContent loads an item file from the registry
-func (t *DirectiveTransformer) loadItemContent(registryPath, name string) (string, error) {
-	itemPath := filepath.Join(registryPath, name+".md")
-
-	data, err := os.ReadFile(itemPath)
-	if err != nil {
-		return "", err
+// loadItemContent loads an item file, checking local registry first then global
+func (t *DirectiveTransformer) loadItemContent(itemType, name string) (string, error) {
+	readItem := func(base string) (string, error) {
+		itemPath := filepath.Join(base, itemType, name+".md")
+		data, err := os.ReadFile(itemPath)
+		if err != nil {
+			return "", err
+		}
+		_, content := extractFrontmatter(data)
+		return strings.TrimSpace(string(content)), nil
 	}
 
-	// Extract frontmatter and content
-	_, content := extractFrontmatter(data)
-	return strings.TrimSpace(string(content)), nil
+	// Try local first
+	if t.LocalPath != "" {
+		if content, err := readItem(t.LocalPath); err == nil {
+			return content, nil
+		}
+	}
+
+	// Fall back to global
+	return readItem(t.RegistryPath)
 }
 
 // expandDocsBlock expands :::docs by detecting doc symlinks in project

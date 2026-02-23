@@ -150,6 +150,7 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd task <action>` | Manage project tasks (list, new, show, delete, status, ...) |
 | `agmd file <action>` | Manage raw files - scripts, configs (list, new, add, show, delete) |
 | `agmd doc <action>` | Manage documentation folders (list, add, show, delete, link, unlink) |
+| `agmd git <args>` | Run any git command in `~/.agmd` from anywhere |
 
 ## Migrating Existing Projects
 
@@ -326,6 +327,51 @@ agmd works out of the box with sensible defaults:
 - Source file: `directives.md`
 - Output file: `AGENTS.md`
 
+## Sync Across Devices
+
+Use `agmd git` to run any git command in `~/.agmd` from anywhere — no need to `cd` first:
+
+```bash
+# One-time setup
+agmd git init
+agmd git remote add origin git@github.com:you/agmd-registry.git
+agmd git add -A && agmd git commit -m "init" && agmd git push
+
+# On another machine
+git clone git@github.com:you/agmd-registry.git ~/.agmd
+
+# Daily sync
+agmd git add -A && agmd git commit -m "sync" && agmd git push
+agmd git pull
+agmd git status
+agmd git log --oneline
+```
+
+All flags pass straight through to git — use any git command you know.
+
+## Local Registry (Team Sharing)
+
+Share project-specific rules with your team by committing a `.agmd/` folder:
+
+```bash
+# Set up a local registry alongside directives.md
+agmd init --local
+
+# Create team-shared rules (goes to .agmd/, not ~/.agmd/)
+agmd new rule:our-coding-style --local
+agmd new guide:architecture --local
+
+# Commit it with the project
+git add .agmd/ && git commit -m "add team rules"
+```
+
+**Resolution order** — local takes priority over global:
+
+1. `.agmd/rule/foo.md` — project-local (team-shared, committed to git)
+2. `~/.agmd/rule/foo.md` — global (personal, synced via `agmd git`)
+
+Teammates clone the repo and `agmd sync` automatically picks up local rules without any extra setup.
+
 ## Philosophy
 
 1. **DRY for AI instructions** - Write once, reference everywhere
@@ -356,6 +402,7 @@ agmd task list --all                      # Include completed tasks
 
 # Manage status and dependencies
 agmd task status setup-db completed       # Update status
+agmd task edit setup-db --priority 0 --type bug  # Change priority/type
 agmd task blocked-by create-api setup-db  # Add dependency
 agmd task unblock create-api setup-db     # Remove dependency
 
@@ -363,12 +410,13 @@ agmd task unblock create-api setup-db     # Remove dependency
 agmd task show setup-db                   # Show task content
 agmd task show --all                      # Show all tasks with content
 agmd task delete setup-db --force         # Delete task
+agmd task clean                           # Delete all completed tasks
 ```
 
-**Priority levels:** P0 (critical), P1 (high), P2 (medium/default), P3 (low), P4 (backlog)
-**Task types:** bug, feature, task (default), chore
+**Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
+**Task types:** bug, feature, task (default, hidden), chore
 
-Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by priority then status. Use `--feature` to scope tasks to specific features or sessions within a project. The `--status`, `--priority`, and `--type` flags filter tasks, and `--tree` visualizes dependency chains. Dependencies passed via `--blocked-by` are validated to ensure they exist.
+Tasks are stored in `.agmd.json` at project root and auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Use `--feature` to scope tasks to features. The `--status`, `--priority`, and `--type` flags filter the list. Dependencies via `--blocked-by` are validated on creation.
 
 ## File Management
 

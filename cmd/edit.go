@@ -23,6 +23,7 @@ var editCmd = &cobra.Command{
 
 Without arguments, opens directives.md in the current directory.
 With type:name argument, opens that item from the registry.
+Reserved types (task, file, doc) are managed through their subcommands.
 
 Examples:
   agmd edit                    # Edit directives.md
@@ -32,7 +33,12 @@ Examples:
 
 For AI assistants (non-interactive):
   agmd edit rule:test --content "# Updated content"
-  echo "New content" | agmd edit rule:test`,
+  echo "New content" | agmd edit rule:test
+
+Reserved types - use their show commands:
+  agmd task show setup-db      # View task content
+  agmd file show script.sh     # View raw file
+  agmd doc show my-docs        # View documentation folder`,
 	ValidArgsFunction: completeTypeName,
 	RunE:              runEdit,
 }

@@ -9,12 +9,14 @@ import (
 // DirectiveExtension is a Goldmark extension for directive parsing
 type DirectiveExtension struct {
 	RegistryPath string
+	LocalPath    string
 }
 
 // NewDirectiveExtension creates a new directive extension
-func NewDirectiveExtension(registryPath string) *DirectiveExtension {
+func NewDirectiveExtension(registryPath, localPath string) *DirectiveExtension {
 	return &DirectiveExtension{
 		RegistryPath: registryPath,
+		LocalPath:    localPath,
 	}
 }
 
@@ -25,7 +27,7 @@ func (e *DirectiveExtension) Extend(m goldmark.Markdown) {
 			util.Prioritized(NewDirectiveParser(), 100),
 		),
 		parser.WithASTTransformers(
-			util.Prioritized(NewDirectiveTransformer(e.RegistryPath), 100),
+			util.Prioritized(NewDirectiveTransformer(e.RegistryPath, e.LocalPath), 100),
 		),
 	)
 }

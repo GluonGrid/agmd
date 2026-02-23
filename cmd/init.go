@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var initLocal bool
+
 var initCmd = &cobra.Command{
 	Use:   "init [profile:name]",
 	Short: "Initialize a new project with directives.md",
@@ -24,17 +26,23 @@ Without a profile, creates directives.md with:
 
 With a profile, creates directives.md from a saved template.
 
+Use --local to also create a project-local .agmd/ registry that takes
+priority over your global ~/.agmd for this project. Commit .agmd/ to
+share project-specific rules with your team.
+
 Run 'agmd sync' to create AGENTS.md from directives.md.
 
 Examples:
   agmd init                    # Initialize with default profile
-  agmd init profile:svelte-kit # Initialize with svelte-kit profile`,
+  agmd init profile:svelte-kit # Initialize with svelte-kit profile
+  agmd init --local            # Also create .agmd/ local registry`,
 	ValidArgsFunction: completeProfileName,
 	RunE:              runInit,
 }
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().BoolVar(&initLocal, "local", false, "Create a project-local .agmd/ registry alongside directives.md")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -159,18 +167,43 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Create local registry if requested
+	if initLocal {
+		localPath := ".agmd"
+		if _, err := os.Stat(localPath); err == nil {
+			fmt.Printf("%s .agmd/ already exists, skipping\n", blue("ℹ"))
+		} else {
+			fmt.Printf("%s Creating .agmd/ local registry...\n", blue("→"))
+			if err := os.MkdirAll(localPath, 0755); err != nil {
+				return fmt.Errorf("failed to create .agmd/: %w", err)
+			}
+			// Add a README so the directory purpose is clear
+			readme := "# Local agmd Registry\n\nItems here override your global ~/.agmd registry for this project.\nCommit this directory to share rules with your team.\n\nCreate items with:\n  agmd new rule:my-rule --local\n"
+			if err := os.WriteFile(filepath.Join(localPath, "README.md"), []byte(readme), 0644); err != nil {
+				return fmt.Errorf("failed to write .agmd/README.md: %w", err)
+			}
+			fmt.Printf("%s Created .agmd/\n", green("✓"))
+		}
+	}
+
 	fmt.Printf("\n%s Project initialized successfully!\n", green("✓"))
 	fmt.Println("\nCreated:")
 	fmt.Printf("  • %s - Source file with directives (edit this)\n", directivesMdFilename)
+	if initLocal {
+		fmt.Printf("  • .agmd/ - Project-local registry (commit this to share with team)\n")
+	}
 	for _, f := range copiedFiles {
 		fmt.Printf("  • %s\n", f)
 	}
 
 	fmt.Println("\nNext steps:")
 	fmt.Println("  • Edit directives.md to add directives")
-	fmt.Println("  • Run 'agmd add rule <name>' to add rules to directives.md")
 	fmt.Println("  • Run 'agmd sync' to create AGENTS.md for AI agents")
-	fmt.Println("  • Run 'agmd new rule <name>' to create custom rules")
+	if initLocal {
+		fmt.Println("  • Run 'agmd new rule:<name> --local' to create team-shared rules")
+	} else {
+		fmt.Println("  • Run 'agmd new rule:<name>' to create rules in your global registry")
+	}
 
 	return nil
 }

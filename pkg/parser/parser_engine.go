@@ -8,13 +8,14 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// ParseAndExpand reads markdown with directives, expands them from registry, and returns expanded markdown
-func ParseAndExpand(input []byte, registryPath string) ([]byte, error) {
+// ParseAndExpand reads markdown with directives, expands them from registry, and returns expanded markdown.
+// localPath is optional (empty string if no local registry).
+func ParseAndExpand(input []byte, registryPath, localPath string) ([]byte, error) {
 	// Create Goldmark with GFM + our directive extension
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
-			NewDirectiveExtension(registryPath),
+			NewDirectiveExtension(registryPath, localPath),
 		),
 	)
 
