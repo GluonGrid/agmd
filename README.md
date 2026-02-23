@@ -37,18 +37,18 @@ Your `directives.md` stays clean and scannable:
 # Project Instructions
 
 ## Code Quality
-:::include rule:typescript
-:::include rule:no-any
+:::use rule:typescript
+:::use rule:no-any
 
 ## Workflows
-:::include workflow:commit
-:::include workflow:pr-review
+:::use workflow:commit
+:::use workflow:pr-review
 
 ## Guidelines
-:::list guideline
-code-style
-documentation
-testing
+:::list
+guideline:code-style
+guideline:documentation
+guideline:testing
 :::end
 ```
 
@@ -107,13 +107,13 @@ Reference items with clean, readable directives:
 
 ```markdown
 # Single item
-:::include rule:typescript
+:::use rule:typescript
 
-# Multiple items
-:::list workflow
-commit
-deploy
-release
+# Multiple items (mixed types)
+:::list
+workflow:commit
+workflow:deploy
+rule:typescript
 :::end
 
 # Inline definition (for project-specific content)
@@ -128,7 +128,7 @@ Your custom content here
 agmd sync  # Expands directives.md → AGENTS.md
 ```
 
-- `:::include` and `:::list` directives expand to full content from registry
+- `:::use` and `:::list` directives expand to full content from registry
 - `:::new` blocks must be promoted first with `agmd promote`
 
 Update a rule in your registry, run `agmd sync` in each project, done.
@@ -193,7 +193,7 @@ Then run `agmd promote` to save them to your registry, followed by `agmd sync` t
 
 ### Collect: For agmd-Compatible Projects
 
-Use `collect` when a project already uses agmd (has `directives.md` with `:::include` directives):
+Use `collect` when a project already uses agmd (has `directives.md` with `:::use` directives):
 
 ```bash
 agmd collect                    # Collect from AGENTS.md (default)
@@ -238,14 +238,14 @@ agmd new rule:typescript
 # 2. Use it in project A
 cd ~/projects/frontend-app
 agmd init
-agmd edit              # Add :::include rule:typescript
+agmd edit              # Add :::use rule:typescript
 agmd sync
 # → AGENTS.md now has your TypeScript standards
 
 # 3. Use the same rule in project B
 cd ~/projects/api-server
 agmd init
-agmd edit              # Add :::include rule:typescript
+agmd edit              # Add :::use rule:typescript
 agmd sync
 # → Same standards, zero copy-paste
 
@@ -267,8 +267,8 @@ agmd new rule:backend/api-design
 Reference with full path:
 
 ```markdown
-:::include rule:frontend/typescript
-:::include rule:backend/api-design
+:::use rule:frontend/typescript
+:::use rule:backend/api-design
 ```
 
 ### Reserved Types
@@ -378,7 +378,7 @@ Teammates clone the repo and `agmd sync` automatically picks up local rules with
 2. **Scannable source** - `directives.md` is short and readable at a glance
 3. **Complete output** - `AGENTS.md` has full expanded context for AI
 4. **Personal registry** - Your standards, your way
-5. **Simple syntax** - Learn 3 directives: `:::include`, `:::list`, `:::new`
+5. **Simple syntax** - Learn 3 directives: `:::use`, `:::list`, `:::new`
 
 ## Task Management
 

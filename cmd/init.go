@@ -21,7 +21,7 @@ var initCmd = &cobra.Command{
 
 Without a profile, creates directives.md with:
 - A title and introduction
-- Example sections showing :::list and :::include directives
+- Example sections showing :::use and :::list directives
 - Instructions on how to use agmd
 
 With a profile, creates directives.md from a saved template.

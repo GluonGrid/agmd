@@ -155,7 +155,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 	// Warning about directives.md
 	fmt.Printf("\n%s If this item is referenced in directives.md, remove or update the reference:\n", yellow("ℹ"))
-	fmt.Printf("  :::include %s:%s\n", itemType, name)
+	fmt.Printf("  :::use %s:%s\n", itemType, name)
 
 	return nil
 }

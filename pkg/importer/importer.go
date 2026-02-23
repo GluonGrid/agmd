@@ -48,13 +48,13 @@ func parseDirectivesStructure(content string) ([]DirectivesSection, error) {
 
 	lines := strings.Split(content, "\n")
 	h2Re := regexp.MustCompile(`^## (.+)$`)
-	listRe := regexp.MustCompile(`^:::list\s+([a-z0-9-]+)\s*$`)
-	includeRe := regexp.MustCompile(`^:::include\s+([a-z0-9-]+):([a-z0-9/_-]+)\s*$`)
+	listRe := regexp.MustCompile(`^:::list\s*$`)
+	useRe := regexp.MustCompile(`^:::use\s+([a-z0-9-]+):([a-z0-9/_-]+)\s*$`)
+	itemRe := regexp.MustCompile(`^([a-z0-9-]+):([a-z0-9/_-]+)\s*$`)
 	endRe := regexp.MustCompile(`^:::end\s*$`)
 
 	var currentSection *DirectivesSection
 	var inList bool
-	var listType string
 
 	for i, line := range lines {
 		// Detect ## Section headers
@@ -74,18 +74,14 @@ func parseDirectivesStructure(content string) ([]DirectivesSection, error) {
 			continue
 		}
 
-		// Detect :::list TYPE
-		if match := listRe.FindStringSubmatch(line); match != nil {
+		// Detect :::list (mixed, no type on directive line)
+		if listRe.MatchString(line) {
 			inList = true
-			listType = match[1]
-			if currentSection != nil {
-				currentSection.ItemType = listType
-			}
 			continue
 		}
 
-		// Detect :::include TYPE:NAME
-		if match := includeRe.FindStringSubmatch(line); match != nil {
+		// Detect :::use TYPE:NAME (single item)
+		if match := useRe.FindStringSubmatch(line); match != nil {
 			itemType := match[1]
 			itemName := match[2]
 			if currentSection != nil {
@@ -98,15 +94,20 @@ func parseDirectivesStructure(content string) ([]DirectivesSection, error) {
 		// Detect :::end
 		if endRe.MatchString(line) {
 			inList = false
-			listType = ""
 			continue
 		}
 
-		// If we're inside a :::list block, collect item names
+		// If we're inside a :::list block, collect type:name items
 		if inList && currentSection != nil {
-			name := strings.TrimSpace(line)
-			if name != "" {
-				currentSection.ItemNames = append(currentSection.ItemNames, name)
+			entry := strings.TrimSpace(line)
+			if match := itemRe.FindStringSubmatch(entry); match != nil {
+				itemType := match[1]
+				itemName := match[2]
+				// Use first item type seen as the section type (for backward compat)
+				if currentSection.ItemType == "" {
+					currentSection.ItemType = itemType
+				}
+				currentSection.ItemNames = append(currentSection.ItemNames, itemName)
 			}
 		}
 	}
@@ -227,33 +228,29 @@ func extractItemsFromAgents(agentsContent string, sections []DirectivesSection) 
 func parseDirectivesManifest(content string) (map[string][]string, error) {
 	manifest := make(map[string][]string)
 
-	// Match :::list TYPE ... :::end blocks
-	listRe := regexp.MustCompile(`(?s):::list\s+([a-z0-9-]+)\s*\n(.*?)\n:::end`)
+	// Match :::list ... :::end blocks (mixed type:name lines)
+	listRe := regexp.MustCompile(`(?s):::list\s*\n(.*?)\n:::end`)
+	itemRe := regexp.MustCompile(`^([a-z0-9-]+):([a-z0-9/_-]+)\s*$`)
 	listMatches := listRe.FindAllStringSubmatch(content, -1)
 
 	for _, match := range listMatches {
-		if len(match) < 3 {
+		if len(match) < 2 {
 			continue
 		}
-		itemType := match[1]
-		items := match[2]
-
-		// Split items by newline and trim
-		lines := strings.Split(items, "\n")
+		lines := strings.Split(match[1], "\n")
 		for _, line := range lines {
-			name := strings.TrimSpace(line)
-			if name == "" {
-				continue
+			entry := strings.TrimSpace(line)
+			if m := itemRe.FindStringSubmatch(entry); m != nil {
+				manifest[m[1]] = append(manifest[m[1]], m[2])
 			}
-			manifest[itemType] = append(manifest[itemType], name)
 		}
 	}
 
-	// Match :::include TYPE:NAME
-	includeRe := regexp.MustCompile(`:::include\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
-	includeMatches := includeRe.FindAllStringSubmatch(content, -1)
+	// Match :::use TYPE:NAME
+	useRe := regexp.MustCompile(`:::use\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
+	useMatches := useRe.FindAllStringSubmatch(content, -1)
 
-	for _, match := range includeMatches {
+	for _, match := range useMatches {
 		if len(match) < 3 {
 			continue
 		}

@@ -21,7 +21,7 @@ var promoteCmd = &cobra.Command{
 	Short: "Promote :::new blocks from directives.md to registry",
 	Long: `Promote :::new blocks from directives.md to the registry.
 This extracts content from :::new markers, saves it to ~/.agmd/,
-and replaces the :::new block with :::include directive.
+and replaces the :::new block with :::use directive.
 
 Interactive mode (no arguments):
   agmd promote
@@ -289,11 +289,11 @@ description: ""
 
 	fmt.Printf("%s Created %s at %s\n", green("✓"), itemType, filePath)
 
-	// Replace :::new block with :::include directive in directives.md
-	replacement := fmt.Sprintf(":::include %s:%s", itemType, name)
+	// Replace :::new block with :::use directive in directives.md
+	replacement := fmt.Sprintf(":::use %s:%s", itemType, name)
 	updatedContent := strings.Replace(directivesContent, fullMatch, replacement, 1)
 
-	fmt.Printf("%s Replaced :::new block with :::include %s:%s\n", green("✓"), itemType, name)
+	fmt.Printf("%s Replaced :::new block with :::use %s:%s\n", green("✓"), itemType, name)
 
 	return updatedContent, nil
 }

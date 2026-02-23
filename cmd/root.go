@@ -22,11 +22,11 @@ How it works:
   3. Run 'agmd sync' to generate AGENTS.md for AI agents
 
 Example directives.md:
-  :::include rule:typescript
-  :::include workflow:commit
-  :::list guideline
-  code-style
-  documentation
+  :::use rule:typescript
+  :::use workflow:commit
+  :::list
+  guideline:code-style
+  guideline:documentation
   :::end
   :::skills                  # auto-detect .claude/skills or .agents/skills
   :::docs                    # list symlinked documentation in ./docs/

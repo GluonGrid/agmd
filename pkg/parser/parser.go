@@ -3,6 +3,7 @@ package parser
 import (
 	"bytes"
 	"regexp"
+	"strings"
 
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
@@ -24,6 +25,9 @@ type directiveData struct {
 
 var directiveDataKey = parser.NewContextKey()
 
+// itemRe matches "type:name" entries; name may include path segments
+var itemRe = regexp.MustCompile(`^([a-z0-9-]+):([a-z0-9/_-]+)$`)
+
 func (b *directiveParser) Trigger() []byte {
 	return []byte{':'}
 }
@@ -36,72 +40,50 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return nil, parser.NoChildren
 	}
 
-	// Match :::include TYPE:NAME (treat as having children to force Continue to be called)
-	// Example: :::include rule:typescript
-	includeRe := regexp.MustCompile(`^:::include\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
-	if match := includeRe.FindSubmatch(line); match != nil {
-		itemType := string(match[1]) // "rule", "workflow"
-		name := string(match[2])      // "typescript"
+	// :::use TYPE:NAME — single item, no :::end needed
+	// Example: :::use rule:typescript
+	useRe := regexp.MustCompile(`^:::use\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
+	if match := useRe.FindSubmatch(line); match != nil {
+		itemType := string(match[1])
+		name := string(match[2])
 
-		// Create a single-item list block
-		node := NewListBlock(itemType)
-		node.Names = []string{name}
-		node.IsSingleItem = true
+		node := NewListBlock()
+		node.Items = []ListItem{{ItemType: itemType, Name: name}}
+		node.isSingleUse = true
 
 		pc.Set(directiveDataKey, &directiveData{node})
-
-		// Advance past the entire line
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
-		
-		// Return NoChildren with Continue - this might help
+		advanceLine(reader, line, segment)
 		return node, parser.NoChildren | parser.Continue
 	}
 
-	// Match :::list TYPE (multi-line, needs :::end)
-	// Example: :::list rule
-	listRe := regexp.MustCompile(`^:::list\s+([a-z0-9-]+)`)
-	if match := listRe.FindSubmatch(line); match != nil {
-		itemType := string(match[1]) // "rule", "workflow"
-
-		node := NewListBlock(itemType)
-		node.IsSingleItem = false
-
+	// :::list — mixed multi-line block, each line is type:name, needs :::end
+	// Example:
+	//   :::list
+	//   rule:typescript
+	//   workflow:commit
+	//   :::end
+	trimmed := bytes.TrimSpace(line)
+	if bytes.Equal(trimmed, []byte(":::list")) {
+		node := NewListBlock()
 		pc.Set(directiveDataKey, &directiveData{node})
-
-		// Advance past the :::list TYPE line
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+		advanceLine(reader, line, segment)
 		return node, parser.NoChildren
 	}
 
-	// Match :::new TYPE:NAME (inline definition, needs :::end)
+	// :::new TYPE:NAME — inline definition, needs :::end
 	// Example: :::new rule:my-auth-rule
 	newRe := regexp.MustCompile(`^:::new\s+([a-z0-9-]+):([a-z0-9/_-]+)`)
 	if match := newRe.FindSubmatch(line); match != nil {
-		itemType := string(match[1]) // "rule", "workflow"
-		name := string(match[2])      // "my-auth-rule"
+		itemType := string(match[1])
+		name := string(match[2])
 
 		node := NewNewItemBlock(itemType, name)
-
 		pc.Set(directiveDataKey, &directiveData{node})
-
-		// Advance past the :::new:TYPE line
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+		advanceLine(reader, line, segment)
 		return node, parser.HasChildren
 	}
 
-	// Match :::docs [path] (single line directive)
+	// :::docs [path] — single line directive
 	// Example: :::docs or :::docs ./reference
 	docsRe := regexp.MustCompile(`^:::docs(?:\s+(.+))?`)
 	if match := docsRe.FindSubmatch(line); match != nil {
@@ -109,23 +91,13 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		if len(match) > 1 && match[1] != nil {
 			searchPath = string(bytes.TrimSpace(match[1]))
 		}
-
 		node := NewDocsBlock(searchPath)
-
 		pc.Set(directiveDataKey, &directiveData{node})
-
-		// Advance past the :::docs line
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
-
-		// Single line directive, close immediately
+		advanceLine(reader, line, segment)
 		return node, parser.NoChildren | parser.Continue
 	}
 
-	// Match :::skills [path] (single line directive)
+	// :::skills [path] — single line directive
 	// Example: :::skills or :::skills .claude/skills
 	skillsRe := regexp.MustCompile(`^:::skills(?:\s+(.+))?`)
 	if match := skillsRe.FindSubmatch(line); match != nil {
@@ -133,15 +105,9 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		if len(match) > 1 && match[1] != nil {
 			searchPath = string(bytes.TrimSpace(match[1]))
 		}
-
 		node := NewSkillsBlock(searchPath)
 		pc.Set(directiveDataKey, &directiveData{node})
-
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+		advanceLine(reader, line, segment)
 		return node, parser.NoChildren | parser.Continue
 	}
 
@@ -152,49 +118,40 @@ func (b *directiveParser) Continue(node ast.Node, reader text.Reader, pc parser.
 	line, segment := reader.PeekLine()
 	trimmed := bytes.TrimSpace(line)
 
-	// For single-item includes, close immediately
-	if listBlock, ok := node.(*ListBlock); ok && listBlock.IsSingleItem {
+	// Single-line directives close immediately
+	switch node.(type) {
+	case *DocsBlock, *SkillsBlock:
 		return parser.Close
 	}
 
-	// For DocsBlock, close immediately (single line directive)
-	if _, ok := node.(*DocsBlock); ok {
-		return parser.Close
-	}
-
-	// For SkillsBlock, close immediately (single line directive)
-	if _, ok := node.(*SkillsBlock); ok {
+	// :::use blocks (single item, pre-populated) close immediately
+	if listBlock, ok := node.(*ListBlock); ok && listBlock.isSingleUse {
 		return parser.Close
 	}
 
 	// Check for :::end
 	if bytes.Equal(trimmed, []byte(":::end")) {
-		// Advance past the :::end line
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+		advanceLine(reader, line, segment)
 		return parser.Close
 	}
 
-	// Handle ListBlock - collect item names
+	// Handle :::list block — collect type:name lines
 	if listBlock, ok := node.(*ListBlock); ok {
-		name := string(trimmed)
-		if name != "" && !bytes.HasPrefix(trimmed, []byte(":::")) {
-			listBlock.Names = append(listBlock.Names, name)
+		entry := string(trimmed)
+		if entry != "" && !strings.HasPrefix(entry, ":::") {
+			if match := itemRe.FindStringSubmatch(entry); match != nil {
+				listBlock.Items = append(listBlock.Items, ListItem{
+					ItemType: match[1],
+					Name:     match[2],
+				})
+			}
+			// silently skip lines that don't match type:name (comments, blanks, etc.)
 		}
-		// Advance to next line
-		newline := 1
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			newline = 0
-		}
-		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+		advanceLine(reader, line, segment)
 		return parser.Continue | parser.NoChildren
 	}
 
-	// Handle NewItemBlock - let Goldmark parse content as children
-	// Don't advance here - let child parsers handle it
+	// Handle NewItemBlock — let Goldmark parse content as children
 	return parser.Continue | parser.HasChildren
 }
 
@@ -214,4 +171,13 @@ func (b *directiveParser) CanInterruptParagraph() bool {
 
 func (b *directiveParser) CanAcceptIndentedLine() bool {
 	return false
+}
+
+// advanceLine advances the reader past a single line
+func advanceLine(reader text.Reader, line []byte, segment text.Segment) {
+	newline := 1
+	if len(line) > 0 && line[len(line)-1] != '\n' {
+		newline = 0
+	}
+	reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
 }

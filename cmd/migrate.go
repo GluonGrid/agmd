@@ -90,7 +90,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 *Migrated with agmd - <https://github.com/GluonGrid/agmd>*
 
-:::include guide:agmd
+:::use guide:agmd
 
 ---
 

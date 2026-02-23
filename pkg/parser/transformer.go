@@ -60,8 +60,8 @@ func (t *DirectiveTransformer) Transform(node *ast.Document, reader text.Reader,
 // expandListBlock expands a :::list block by loading registry files
 func (t *DirectiveTransformer) expandListBlock(listBlock *ListBlock, doc *ast.Document, reader text.Reader) {
 	// Load each item file and insert content
-	for _, itemName := range listBlock.Names {
-		content, err := t.loadItemContent(listBlock.ItemType, itemName)
+	for _, item := range listBlock.Items {
+		content, err := t.loadItemContent(item.ItemType, item.Name)
 		if err != nil {
 			// Silently skip missing items - validation can catch this later
 			continue

@@ -4,12 +4,17 @@ import (
 	"github.com/yuin/goldmark/ast"
 )
 
-// ListBlock represents :::list TYPE ... :::end or :::include:TYPE name
+// ListItem represents a single type:name pair in a :::list block
+type ListItem struct {
+	ItemType string // "rule", "workflow", "guideline", etc.
+	Name     string // item name (may include path like "frontend/typescript")
+}
+
+// ListBlock represents a :::list ... :::end block or :::use type:name (single item)
 type ListBlock struct {
 	ast.BaseBlock
-	ItemType     string   // "rules", "workflows", "guidelines"
-	Names        []string // Item names to load
-	IsSingleItem bool     // True for :::include (no :::end needed)
+	Items       []ListItem // mixed type:name pairs
+	isSingleUse bool       // true when created by :::use (single line, no :::end)
 }
 
 // KindListBlock is the kind of ListBlock
@@ -25,15 +30,14 @@ func (n *ListBlock) Dump(source []byte, level int) {
 	ast.DumpHelper(n, source, level, nil, nil)
 }
 
-// NewListBlock creates a new ListBlock
-func NewListBlock(itemType string) *ListBlock {
+// NewListBlock creates a new empty ListBlock
+func NewListBlock() *ListBlock {
 	return &ListBlock{
-		ItemType: itemType,
-		Names:    []string{},
+		Items: []ListItem{},
 	}
 }
 
-// NewItemBlock represents :::new:TYPE name=foo ... :::end
+// NewItemBlock represents :::new TYPE:name ... :::end
 type NewItemBlock struct {
 	ast.BaseBlock
 	ItemType string // "rule", "workflow", "guideline"

@@ -16,7 +16,7 @@ var collectCmd = &cobra.Command{
 	Short: "Collect rules from an agmd-compatible project into your registry",
 	Long: `Collect rules, workflows, and guidelines from an agmd-compatible project into your personal registry.
 
-This command is for projects that already use agmd (have directives.md with :::include directives).
+This command is for projects that already use agmd (have directives.md with :::use directives).
 It parses directives.md to find referenced items and extracts their content from AGENTS.md.
 
 Use this when:

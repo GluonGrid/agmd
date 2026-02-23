@@ -11,7 +11,7 @@ const features = [
     icon: "code",
     color: "bg-secondary/10 text-secondary",
     title: "Simple Syntax",
-    description: "Learn just 3 directives: `:::include` to reuse single items, `:::list` for groups, and `:::new` to define inline content."
+    description: "Learn just 3 directives: `:::use` to reuse single items, `:::list` for mixed groups, and `:::new` to define inline content."
   },
   {
     icon: "move_up",

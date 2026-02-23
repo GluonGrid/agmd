@@ -71,18 +71,18 @@ export const ComparisonSection: React.FC = () => {
                 <br/>
                 <div className="text-text-sub">## Code Quality</div>
                 <div>
-                  <span className="text-secondary">:::include</span> <span className="text-text-main">rule:typescript</span>
+                  <span className="text-secondary">:::use</span> <span className="text-text-main">rule:typescript</span>
                 </div>
                 <div className="mb-4">
-                  <span className="text-secondary">:::include</span> <span className="text-text-main">rule:no-any</span>
+                  <span className="text-secondary">:::use</span> <span className="text-text-main">rule:no-any</span>
                 </div>
-                
+
                 <div className="text-text-sub">## Workflows</div>
                 <div>
-                    <span className="text-secondary">:::list</span> <span className="text-text-main">workflow</span>
+                    <span className="text-secondary">:::list</span>
                 </div>
-                <div className="pl-4 text-text-sub">commit</div>
-                <div className="pl-4 text-text-sub">deploy</div>
+                <div className="pl-4 text-text-sub">workflow:commit</div>
+                <div className="pl-4 text-text-sub">workflow:deploy</div>
                 <div className="text-secondary">:::end</div>
                 
                 <div className="text-primary font-bold select-none flex items-center gap-2 mt-6 pt-4 border-t border-surface/50 text-xs">

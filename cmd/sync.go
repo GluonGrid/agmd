@@ -19,7 +19,7 @@ var syncCmd = &cobra.Command{
 The command:
 1. Checks for unpromoted :::new blocks (errors if found)
 2. Reads directives.md (source file with directives)
-3. Expands all :::include and :::list directives with content from registry
+3. Expands all :::use and :::list directives with content from registry
 4. Writes expanded output to AGENTS.md
 
 All non-directive content is preserved.
