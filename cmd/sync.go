@@ -18,17 +18,23 @@ var syncCmd = &cobra.Command{
 
 The command:
 1. Checks for unpromoted :::new blocks (errors if found)
-2. Reads directives.md (source file with directives)
-3. Expands all :::use and :::list directives with content from registry
-4. Writes expanded output to AGENTS.md
+2. Reads directives.md (committed, shared with team)
+3. Merges directives.local.md if present (gitignored, personal overrides)
+4. Expands all :::use and :::list directives with content from registry
+5. Writes expanded output to AGENTS.md
 
 All non-directive content is preserved.
+
+Personal overrides:
+  Create directives.local.md alongside directives.md for machine-specific
+  or personal directives that should not be committed. It is automatically
+  appended to directives.md during sync. Add it to .gitignore.
 
 Note: If you have :::new blocks, run 'agmd promote' first to add them to
 your registry with proper metadata (name, description).
 
 Examples:
-  agmd sync               # Generate AGENTS.md from directives.md`,
+  agmd sync               # Generate AGENTS.md from directives.md (+ .local)`,
 	RunE: runSync,
 }
 
@@ -78,9 +84,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Create generator
 	gen := generator.New(reg, nil)
 
-	// Parse and expand directives from directives.md
+	// Check for directives.local.md (personal overrides, gitignored)
+	localDirectivesPath := ""
+	if _, err := os.Stat(localDirectivesMdFilename); err == nil {
+		localDirectivesPath = localDirectivesMdFilename
+		dim := color.New(color.Faint).SprintFunc()
+		fmt.Printf("%s Found %s %s\n", blue("→"), localDirectivesMdFilename, dim("(personal overrides)"))
+		addToGitignore(localDirectivesMdFilename)
+	}
+
+	// Parse and expand directives from directives.md (+ optional .local)
 	fmt.Printf("%s Parsing and expanding directives...\n", blue("→"))
-	content, err := gen.ParseAndExpand(directivesMdFilename)
+	content, err := gen.ParseAndExpand(directivesMdFilename, localDirectivesPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse and expand directives.md: %w", err)
 	}
@@ -91,7 +106,11 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%s Generated AGENTS.md successfully!\n", green("✓"))
-	fmt.Printf("%s Source: %s → Output: %s\n", blue("ℹ"), directivesMdFilename, agentsMdFilename)
+	if localDirectivesPath != "" {
+		fmt.Printf("%s Sources: %s + %s → %s\n", blue("ℹ"), directivesMdFilename, localDirectivesMdFilename, agentsMdFilename)
+	} else {
+		fmt.Printf("%s Source: %s → Output: %s\n", blue("ℹ"), directivesMdFilename, agentsMdFilename)
+	}
 
 	return nil
 }

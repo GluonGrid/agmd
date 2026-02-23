@@ -102,5 +102,6 @@ agmd task unblock api setup-db                   # Remove dependency
 - Use ` + "`:::new`" + ` for project-specific content, then ` + "`agmd promote`" + ` to reuse elsewhere
 - Types are flexible: use rule, workflow, prompt, guide, or any custom type
 - Reserved types (task, doc, file) use resource-first subcommands (e.g., ` + "`agmd task list`" + `)
+- Create ` + "`directives.local.md`" + ` for personal/machine-specific directives (gitignored, merged at sync)
 `
 }

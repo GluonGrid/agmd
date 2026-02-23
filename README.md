@@ -372,6 +372,26 @@ git add .agmd/ && git commit -m "add team rules"
 
 Teammates clone the repo and `agmd sync` automatically picks up local rules without any extra setup.
 
+## Personal Overrides (directives.local.md)
+
+For machine-specific or personal directives you don't want committed, create `directives.local.md` alongside `directives.md`:
+
+```bash
+# Create your personal overrides (automatically gitignored by agmd init)
+touch directives.local.md
+
+# Add personal directives — only you see these
+echo ":::use rule:my-local-tool" >> directives.local.md
+```
+
+`agmd sync` automatically merges `directives.local.md` into the output if it exists. It's appended after `directives.md`, so your overrides always win. The file is added to `.gitignore` automatically by `agmd init`.
+
+**When to use it:**
+- Machine-specific tools or paths only available on your machine
+- Personal coding preferences your team hasn't agreed on
+- Experimental rules you're testing before proposing to the team
+- Rules from your global `~/.agmd` you want active only in this project
+
 ## Philosophy
 
 1. **DRY for AI instructions** - Write once, reference everywhere

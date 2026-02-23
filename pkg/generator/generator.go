@@ -93,8 +93,10 @@ func formatAsSubsection(name, content string) string {
 	return builder.String()
 }
 
-// ParseAndExpand reads directives.md, strips frontmatter, expands directives from registry, and returns the result
-func (g *Generator) ParseAndExpand(inputPath string) (string, error) {
+// ParseAndExpand reads directives.md (and optional directives.local.md), strips
+// frontmatter, merges them, expands directives from registry, and returns the result.
+// localInputPath is optional — pass "" to skip.
+func (g *Generator) ParseAndExpand(inputPath, localInputPath string) (string, error) {
 	content, err := os.ReadFile(inputPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s: %w", inputPath, err)
@@ -102,6 +104,16 @@ func (g *Generator) ParseAndExpand(inputPath string) (string, error) {
 
 	// Strip frontmatter if present
 	content = stripFrontmatter(content)
+
+	// Append directives.local.md if it exists
+	if localInputPath != "" {
+		if localContent, err := os.ReadFile(localInputPath); err == nil {
+			localContent = stripFrontmatter(localContent)
+			content = append(content, '\n')
+			content = append(content, localContent...)
+		}
+		// If the file doesn't exist, silently skip — it's optional
+	}
 
 	// Use the parser to expand directives (local registry takes priority)
 	expanded, err := parser.ParseAndExpand(content, g.Registry.BasePath, g.Registry.LocalPath)

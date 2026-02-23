@@ -19,7 +19,8 @@ and match across any project.
 How it works:
   1. Store reusable instructions in ~/.agmd/ (your personal registry)
   2. Reference them in directives.md with simple directives
-  3. Run 'agmd sync' to generate AGENTS.md for AI agents
+  3. Optionally add directives.local.md for personal/machine-specific overrides
+  4. Run 'agmd sync' to generate AGENTS.md for AI agents
 
 Example directives.md:
   :::use rule:typescript

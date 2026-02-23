@@ -121,6 +121,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Created directives.md\n", green("✓"))
 
+	// Always add directives.local.md to .gitignore
+	if err := addToGitignore(localDirectivesMdFilename); err == nil {
+		fmt.Printf("%s Added %s to .gitignore\n", green("✓"), localDirectivesMdFilename)
+	}
+
 	// Copy files from profile if any
 	var copiedFiles []string
 	if profile != nil && len(profile.Files) > 0 {
@@ -199,6 +204,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("\nNext steps:")
 	fmt.Println("  • Edit directives.md to add directives")
 	fmt.Println("  • Run 'agmd sync' to create AGENTS.md for AI agents")
+	fmt.Printf("  • Create %s for personal/machine-specific directives (gitignored)\n", localDirectivesMdFilename)
 	if initLocal {
 		fmt.Println("  • Run 'agmd new rule:<name> --local' to create team-shared rules")
 	} else {
