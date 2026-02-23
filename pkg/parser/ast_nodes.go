@@ -90,3 +90,30 @@ func NewDocsBlock(searchPath string) *DocsBlock {
 		SearchPath: searchPath,
 	}
 }
+
+// SkillsBlock represents :::skills [path] directive
+// Expands to <available_skills> XML block for Agent Skills integration
+type SkillsBlock struct {
+	ast.BaseBlock
+	SearchPath string // Path to search for linked skills (default: auto-detect)
+}
+
+// KindSkillsBlock is the kind of SkillsBlock
+var KindSkillsBlock = ast.NewNodeKind("SkillsBlock")
+
+// Kind implements ast.Node
+func (n *SkillsBlock) Kind() ast.NodeKind {
+	return KindSkillsBlock
+}
+
+// Dump implements ast.Node
+func (n *SkillsBlock) Dump(source []byte, level int) {
+	ast.DumpHelper(n, source, level, nil, nil)
+}
+
+// NewSkillsBlock creates a new SkillsBlock
+func NewSkillsBlock(searchPath string) *SkillsBlock {
+	return &SkillsBlock{
+		SearchPath: searchPath,
+	}
+}

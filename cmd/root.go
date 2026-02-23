@@ -28,6 +28,8 @@ Example directives.md:
   code-style
   documentation
   :::end
+  :::skills                  # auto-detect .claude/skills or .agents/skills
+  :::docs                    # list symlinked documentation in ./docs/
 
 Benefits:
   • One source of truth for your coding standards
@@ -44,6 +46,12 @@ Special subcommands:
   agmd task     # Manage project tasks with dependencies
   agmd file     # Manage raw files (scripts, configs)
   agmd doc      # Manage documentation folders
+  agmd skill    # Manage Agent Skills (install, link, list)
+
+Agent Skills:
+  agmd skill install owner/repo   # install from GitHub
+  agmd skill link my-skill        # symlink into agent dirs
+  agmd skill list                 # list installed skills
 
 Sync across devices:
   agmd git init

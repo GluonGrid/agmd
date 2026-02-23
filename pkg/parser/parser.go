@@ -125,6 +125,26 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return node, parser.NoChildren | parser.Continue
 	}
 
+	// Match :::skills [path] (single line directive)
+	// Example: :::skills or :::skills .claude/skills
+	skillsRe := regexp.MustCompile(`^:::skills(?:\s+(.+))?`)
+	if match := skillsRe.FindSubmatch(line); match != nil {
+		searchPath := ""
+		if len(match) > 1 && match[1] != nil {
+			searchPath = string(bytes.TrimSpace(match[1]))
+		}
+
+		node := NewSkillsBlock(searchPath)
+		pc.Set(directiveDataKey, &directiveData{node})
+
+		newline := 1
+		if len(line) > 0 && line[len(line)-1] != '\n' {
+			newline = 0
+		}
+		reader.Advance(segment.Stop - segment.Start - newline + segment.Padding)
+		return node, parser.NoChildren | parser.Continue
+	}
+
 	return nil, parser.NoChildren
 }
 
@@ -139,6 +159,11 @@ func (b *directiveParser) Continue(node ast.Node, reader text.Reader, pc parser.
 
 	// For DocsBlock, close immediately (single line directive)
 	if _, ok := node.(*DocsBlock); ok {
+		return parser.Close
+	}
+
+	// For SkillsBlock, close immediately (single line directive)
+	if _, ok := node.(*SkillsBlock); ok {
 		return parser.Close
 	}
 

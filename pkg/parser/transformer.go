@@ -1,9 +1,12 @@
 package parser
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"agmd/pkg/skills"
 
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
@@ -44,6 +47,8 @@ func (t *DirectiveTransformer) Transform(node *ast.Document, reader text.Reader,
 			t.expandListBlock(block, node, reader)
 		case *DocsBlock:
 			t.expandDocsBlock(block)
+		case *SkillsBlock:
+			t.expandSkillsBlock(block)
 		case *NewItemBlock:
 			// Keep as-is, content already parsed as children
 		}
@@ -189,6 +194,66 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 			docsBlock.AppendChild(docsBlock, treePara)
 		}
 	}
+}
+
+// expandSkillsBlock expands :::skills into <available_skills> XML block
+func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
+	searchPath := skillsBlock.SearchPath
+
+	// Auto-detect search path if not specified
+	if searchPath == "" {
+		if _, err := os.Stat(".claude/skills"); err == nil {
+			searchPath = ".claude/skills"
+		} else if _, err := os.Stat(".agents/skills"); err == nil {
+			searchPath = ".agents/skills"
+		} else {
+			// No skills dir found
+			para := ast.NewParagraph()
+			para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill install owner/repo` then `agmd skill link <name>`.*")))
+			skillsBlock.AppendChild(skillsBlock, para)
+			return
+		}
+	}
+
+	linked, err := skills.FindLinkedSkills(searchPath)
+	if err != nil || len(linked) == 0 {
+		para := ast.NewParagraph()
+		para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill install owner/repo` then `agmd skill link <name>`.*")))
+		skillsBlock.AppendChild(skillsBlock, para)
+		return
+	}
+
+	// Build <available_skills> XML block
+	var sb strings.Builder
+	sb.WriteString("<available_skills>\n")
+	for _, s := range linked {
+		// Resolve absolute path for location field
+		absPath := s.SkillMDPath
+		if !filepath.IsAbs(absPath) {
+			if abs, err := filepath.Abs(absPath); err == nil {
+				absPath = abs
+			}
+		}
+		sb.WriteString(fmt.Sprintf("  <skill>\n"))
+		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", xmlEscape(s.Name)))
+		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", xmlEscape(s.Description)))
+		sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", absPath))
+		sb.WriteString(fmt.Sprintf("  </skill>\n"))
+	}
+	sb.WriteString("</available_skills>")
+
+	para := ast.NewParagraph()
+	para.AppendChild(para, ast.NewString([]byte(sb.String())))
+	skillsBlock.AppendChild(skillsBlock, para)
+}
+
+// xmlEscape escapes special XML characters
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	return s
 }
 
 type docInfo struct {
