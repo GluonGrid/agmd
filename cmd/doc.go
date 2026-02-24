@@ -427,6 +427,8 @@ func runDocLink(cmd *cobra.Command, args []string) error {
 			target, _ := os.Readlink(destPath)
 			if target == docPath {
 				fmt.Printf("%s doc:%s already linked at %s\n", blue("ℹ"), name, destPath)
+				// Still update directives.md in case the block entry is missing
+				updateDirectivesDocsBlock(name, true, blue)
 				return nil
 			}
 			return fmt.Errorf("%s already exists as symlink to %s", destPath, target)

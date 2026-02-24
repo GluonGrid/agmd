@@ -99,9 +99,9 @@ func RemoveFromDirective(content []byte, itemType, name string) ([]byte, error) 
 }
 
 // AddToDocsBlock adds a doc name to the :::docs ... :::end block in directives.md.
-// If no :::docs block exists, it creates one at the end of the file.
+// If no :::docs block exists, it creates one with a "## Docs available" heading at the end.
 func AddToDocsBlock(content []byte, name string) ([]byte, error) {
-	return addToNamedBlock(content, ":::docs", name)
+	return addToNamedBlock(content, ":::docs", name, "## Docs available")
 }
 
 // RemoveFromDocsBlock removes a doc name from the :::docs ... :::end block.
@@ -110,9 +110,9 @@ func RemoveFromDocsBlock(content []byte, name string) ([]byte, error) {
 }
 
 // AddToSkillsBlock adds a skill name to the :::skills ... :::end block in directives.md.
-// If no :::skills block exists, it creates one at the end of the file.
+// If no :::skills block exists, it creates one with a "## Skills available" heading at the end.
 func AddToSkillsBlock(content []byte, name string) ([]byte, error) {
-	return addToNamedBlock(content, ":::skills", name)
+	return addToNamedBlock(content, ":::skills", name, "## Skills available")
 }
 
 // RemoveFromSkillsBlock removes a skill name from the :::skills ... :::end block.
@@ -121,8 +121,8 @@ func RemoveFromSkillsBlock(content []byte, name string) ([]byte, error) {
 }
 
 // addToNamedBlock adds a bare name line to a :::TAG ... :::end block.
-// Creates the block at the end of the file if not found.
-func addToNamedBlock(content []byte, tag, name string) ([]byte, error) {
+// If the block doesn't exist, it creates it at the end with the given heading.
+func addToNamedBlock(content []byte, tag, name, heading string) ([]byte, error) {
 	openPattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(tag) + `\s*$`)
 	endPattern := regexp.MustCompile(`(?m)^:::end$`)
 
@@ -145,12 +145,18 @@ func addToNamedBlock(content []byte, tag, name string) ([]byte, error) {
 		return buf.Bytes(), nil
 	}
 
-	// No block found — create one at end
+	// No block found — create one with heading at end of file
 	var buf bytes.Buffer
 	buf.Write(content)
-	if len(content) > 0 && content[len(content)-1] != '\n' {
-		buf.WriteByte('\n')
+	// Ensure two newlines before the heading
+	if len(content) > 0 {
+		trimmed := bytes.TrimRight(content, "\n")
+		extra := len(content) - len(trimmed) // trailing newlines already present
+		for i := extra; i < 2; i++ {
+			buf.WriteByte('\n')
+		}
 	}
+	buf.WriteString(heading + "\n\n")
 	buf.WriteString(tag + "\n")
 	buf.WriteString(name + "\n")
 	buf.WriteString(":::end\n")
