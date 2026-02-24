@@ -83,29 +83,33 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return node, parser.HasChildren
 	}
 
-	// :::docs [path] — single line directive
-	// Example: :::docs or :::docs ./reference
+	// :::docs [names|path] — single line directive
+	// Examples: :::docs                        → all linked docs
+	//           :::docs svelte-packages ts     → explicit names (filter)
+	//           :::docs ./reference            → custom path
 	docsRe := regexp.MustCompile(`^:::docs(?:\s+(.+))?`)
 	if match := docsRe.FindSubmatch(line); match != nil {
-		searchPath := ""
+		arg := ""
 		if len(match) > 1 && match[1] != nil {
-			searchPath = string(bytes.TrimSpace(match[1]))
+			arg = string(bytes.TrimSpace(match[1]))
 		}
-		node := NewDocsBlock(searchPath)
+		node := NewDocsBlock(arg)
 		pc.Set(directiveDataKey, &directiveData{node})
 		advanceLine(reader, line, segment)
 		return node, parser.NoChildren | parser.Continue
 	}
 
-	// :::skills [path] — single line directive
-	// Example: :::skills or :::skills .claude/skills
+	// :::skills [names|path] — single line directive
+	// Examples: :::skills                      → all linked skills
+	//           :::skills managing-agmd pdf    → explicit names (filter)
+	//           :::skills .claude/skills       → custom path
 	skillsRe := regexp.MustCompile(`^:::skills(?:\s+(.+))?`)
 	if match := skillsRe.FindSubmatch(line); match != nil {
-		searchPath := ""
+		arg := ""
 		if len(match) > 1 && match[1] != nil {
-			searchPath = string(bytes.TrimSpace(match[1]))
+			arg = string(bytes.TrimSpace(match[1]))
 		}
-		node := NewSkillsBlock(searchPath)
+		node := NewSkillsBlock(arg)
 		pc.Set(directiveDataKey, &directiveData{node})
 		advanceLine(reader, line, segment)
 		return node, parser.NoChildren | parser.Continue

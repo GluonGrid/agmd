@@ -232,6 +232,35 @@ func completeProfileName(cmd *cobra.Command, args []string, toComplete string) (
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completeSkillName provides completion for skill names
+func completeSkillName(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	reg, err := registry.New()
+	if err != nil || !reg.Exists() {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	skillDir := filepath.Join(reg.BasePath, "skill")
+	entries, err := os.ReadDir(skillDir)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var completions []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), toComplete) {
+			completions = append(completions, entry.Name())
+		}
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
 // completeFileName provides completion for file names in the registry
 func completeFileName(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {

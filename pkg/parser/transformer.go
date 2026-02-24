@@ -153,6 +153,21 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 		}
 	}
 
+	// Filter by explicit names if provided
+	if len(docsBlock.Names) > 0 {
+		allowed := make(map[string]bool, len(docsBlock.Names))
+		for _, n := range docsBlock.Names {
+			allowed[n] = true
+		}
+		filtered := docs[:0]
+		for _, d := range docs {
+			if allowed[d.Name] {
+				filtered = append(filtered, d)
+			}
+		}
+		docs = filtered
+	}
+
 	if len(docs) == 0 {
 		para := ast.NewParagraph()
 		para.AppendChild(para, ast.NewString([]byte("*No documentation linked. Use `agmd doc link <name>` to add documentation.*")))
@@ -200,8 +215,8 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
 	searchPath := skillsBlock.SearchPath
 
-	// Auto-detect search path if not specified
-	if searchPath == "" {
+	// Auto-detect search path if not specified and no explicit names given
+	if searchPath == "" && len(skillsBlock.Names) == 0 {
 		if _, err := os.Stat(".claude/skills"); err == nil {
 			searchPath = ".claude/skills"
 		} else if _, err := os.Stat(".agents/skills"); err == nil {
@@ -209,16 +224,42 @@ func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
 		} else {
 			// No skills dir found
 			para := ast.NewParagraph()
-			para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill install owner/repo` then `agmd skill link <name>`.*")))
+			para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill link <name>` to add a skill.*")))
 			skillsBlock.AppendChild(skillsBlock, para)
 			return
+		}
+	} else if searchPath == "" {
+		// Names provided but no explicit path — still auto-detect search path
+		if _, err := os.Stat(".claude/skills"); err == nil {
+			searchPath = ".claude/skills"
+		} else if _, err := os.Stat(".agents/skills"); err == nil {
+			searchPath = ".agents/skills"
 		}
 	}
 
 	linked, err := skills.FindLinkedSkills(searchPath)
-	if err != nil || len(linked) == 0 {
+	if err != nil {
+		linked = nil
+	}
+
+	// Filter by explicit names if provided
+	if len(skillsBlock.Names) > 0 {
+		allowed := make(map[string]bool, len(skillsBlock.Names))
+		for _, n := range skillsBlock.Names {
+			allowed[n] = true
+		}
+		filtered := linked[:0]
+		for _, s := range linked {
+			if allowed[s.Name] {
+				filtered = append(filtered, s)
+			}
+		}
+		linked = filtered
+	}
+
+	if len(linked) == 0 {
 		para := ast.NewParagraph()
-		para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill install owner/repo` then `agmd skill link <name>`.*")))
+		para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill link <name>` to add a skill.*")))
 		skillsBlock.AppendChild(skillsBlock, para)
 		return
 	}

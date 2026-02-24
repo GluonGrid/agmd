@@ -50,10 +50,12 @@ workflow:commit
 :::new type:name         # Define inline content (promote to registry later)
 content here...
 :::end
-:::docs                  # List symlinked documentation in ./docs/
-:::docs ./reference      # List symlinked documentation in custom path
-:::skills                # Inject <available_skills> XML (auto-detect .claude/ or .agents/)
-:::skills .claude/skills # Explicit path
+:::docs                  # All linked docs in ./docs/ (auto-detect)
+:::docs svelte ts        # Only named docs (explicit filter)
+:::docs ./reference      # Custom path
+:::skills                # All linked skills (auto-detect .claude/ or .agents/)
+:::skills managing-agmd  # Only named skills (explicit filter)
+:::skills .claude/skills # Custom path
 ` + "```" + `
 
 ### Commands for AI Assistants

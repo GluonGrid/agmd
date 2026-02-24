@@ -59,10 +59,11 @@ var skillListCmd = &cobra.Command{
 }
 
 var skillShowCmd = &cobra.Command{
-	Use:   "show <name>",
-	Short: "Show SKILL.md content",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSkillShow,
+	Use:               "show <name>",
+	Short:             "Show SKILL.md content",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSkillName,
+	RunE:              runSkillShow,
 }
 
 var skillLinkTarget string
@@ -82,29 +83,33 @@ Examples:
   agmd skill link pdf                    # auto-detect target
   agmd skill link pdf --target claude    # link to .claude/skills/
   agmd skill link pdf --target both      # link to both`,
-	Args: cobra.ExactArgs(1),
-	RunE: runSkillLink,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSkillName,
+	RunE:              runSkillLink,
 }
 
 var skillUnlinkCmd = &cobra.Command{
-	Use:   "unlink <name>",
-	Short: "Remove skill symlinks from agent directories",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSkillUnlink,
+	Use:               "unlink <name>",
+	Short:             "Remove skill symlinks from agent directories",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSkillName,
+	RunE:              runSkillUnlink,
 }
 
 var skillDeleteCmd = &cobra.Command{
-	Use:   "delete <name>",
-	Short: "Delete an installed skill from the registry",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSkillDelete,
+	Use:               "delete <name>",
+	Short:             "Delete an installed skill from the registry",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSkillName,
+	RunE:              runSkillDelete,
 }
 
 var skillUpdateCmd = &cobra.Command{
-	Use:   "update <name>",
-	Short: "Re-fetch and update an installed skill",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSkillUpdate,
+	Use:               "update <name>",
+	Short:             "Re-fetch and update an installed skill",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSkillName,
+	RunE:              runSkillUpdate,
 }
 
 func init() {
@@ -354,15 +359,21 @@ func runSkillLink(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 
-		// Remove existing symlink if any
-		if _, err := os.Lstat(linkPath); err == nil {
-			os.Remove(linkPath)
-		}
-
-		// Create absolute symlink
+		// Create absolute symlink target path
 		absSkillPath, err := filepath.Abs(skill.Path)
 		if err != nil {
 			absSkillPath = skill.Path
+		}
+
+		// Check if already correctly linked
+		if existing, err := os.Readlink(linkPath); err == nil && existing == absSkillPath {
+			fmt.Printf("%s Already linked: %s\n", green("ok"), linkPath)
+			continue
+		}
+
+		// Remove existing symlink or stale entry
+		if _, err := os.Lstat(linkPath); err == nil {
+			os.Remove(linkPath)
 		}
 
 		fmt.Printf("%s Linking %s → %s\n", blue("->"), linkPath, absSkillPath)

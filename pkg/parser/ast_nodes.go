@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"github.com/yuin/goldmark/ast"
 )
 
@@ -69,7 +71,8 @@ func NewNewItemBlock(itemType, name string) *NewItemBlock {
 // It expands to list available doc symlinks in the project
 type DocsBlock struct {
 	ast.BaseBlock
-	SearchPath string // Optional: custom path to search for docs (default: "docs")
+	SearchPath string   // Optional: custom path to search for docs (default: "docs")
+	Names      []string // Optional: explicit doc names to include (filter); empty = all
 }
 
 // KindDocsBlock is the kind of DocsBlock
@@ -85,21 +88,27 @@ func (n *DocsBlock) Dump(source []byte, level int) {
 	ast.DumpHelper(n, source, level, nil, nil)
 }
 
-// NewDocsBlock creates a new DocsBlock
-func NewDocsBlock(searchPath string) *DocsBlock {
-	if searchPath == "" {
-		searchPath = "docs"
+// NewDocsBlock creates a new DocsBlock.
+// arg is either empty (auto-detect), a path (starts with . or /), or space-separated names.
+func NewDocsBlock(arg string) *DocsBlock {
+	if arg == "" {
+		return &DocsBlock{SearchPath: "docs"}
 	}
-	return &DocsBlock{
-		SearchPath: searchPath,
+	// If it looks like a path, treat as search path override
+	if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") {
+		return &DocsBlock{SearchPath: arg}
 	}
+	// Otherwise treat as space-separated doc names (filter)
+	names := strings.Fields(arg)
+	return &DocsBlock{SearchPath: "docs", Names: names}
 }
 
-// SkillsBlock represents :::skills [path] directive
+// SkillsBlock represents :::skills directive
 // Expands to <available_skills> XML block for Agent Skills integration
 type SkillsBlock struct {
 	ast.BaseBlock
-	SearchPath string // Path to search for linked skills (default: auto-detect)
+	SearchPath string   // Path to search for linked skills (default: auto-detect)
+	Names      []string // Optional: explicit skill names to include (filter); empty = all
 }
 
 // KindSkillsBlock is the kind of SkillsBlock
@@ -115,9 +124,17 @@ func (n *SkillsBlock) Dump(source []byte, level int) {
 	ast.DumpHelper(n, source, level, nil, nil)
 }
 
-// NewSkillsBlock creates a new SkillsBlock
-func NewSkillsBlock(searchPath string) *SkillsBlock {
-	return &SkillsBlock{
-		SearchPath: searchPath,
+// NewSkillsBlock creates a new SkillsBlock.
+// arg is either empty (auto-detect), a path (starts with . or /), or space-separated names.
+func NewSkillsBlock(arg string) *SkillsBlock {
+	if arg == "" {
+		return &SkillsBlock{}
 	}
+	// If it looks like a path, treat as search path override
+	if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") {
+		return &SkillsBlock{SearchPath: arg}
+	}
+	// Otherwise treat as space-separated skill names (filter)
+	names := strings.Fields(arg)
+	return &SkillsBlock{Names: names}
 }
