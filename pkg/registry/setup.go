@@ -28,9 +28,9 @@ func (r *Registry) Setup(force bool) error {
 		return fmt.Errorf("failed to create default guide: %w", err)
 	}
 
-	// Create bundled agmd-migrate skill
-	if err := r.createDefaultMigrateSkill(); err != nil {
-		return fmt.Errorf("failed to create agmd-migrate skill: %w", err)
+	// Create bundled managing-agmd skill
+	if err := r.createDefaultManagingSkill(); err != nil {
+		return fmt.Errorf("failed to create managing-agmd skill: %w", err)
 	}
 
 	return nil
@@ -63,12 +63,46 @@ func (r *Registry) createDefaultGuide() error {
 	return os.WriteFile(guidePath, []byte(GetAgmdGuideTemplate()), 0644)
 }
 
-// createDefaultMigrateSkill creates the bundled agmd-migrate skill
-func (r *Registry) createDefaultMigrateSkill() error {
-	skillDir := filepath.Join(r.BasePath, "skill", "agmd-migrate")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+// createDefaultManagingSkill creates the bundled managing-agmd skill with full structure
+func (r *Registry) createDefaultManagingSkill() error {
+	skillDir := filepath.Join(r.BasePath, "skill", "managing-agmd")
+
+	// Create all subdirectories
+	for _, sub := range []string{"", "references", "assets", "scripts"} {
+		if err := os.MkdirAll(filepath.Join(skillDir, sub), 0755); err != nil {
+			return err
+		}
+	}
+
+	// Write each file
+	files := map[string]string{
+		"SKILL.md":                    GetManagingAgmdSkillTemplate(),
+		"references/migration.md":     GetManagingAgmdMigrationRef(),
+		"references/tasks.md":         GetManagingAgmdTasksRef(),
+		"references/directives.md":    GetManagingAgmdDirectivesRef(),
+		"scripts/check-setup.sh":      GetManagingAgmdCheckScript(),
+	}
+
+	for rel, content := range files {
+		path := filepath.Join(skillDir, rel)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", rel, err)
+		}
+	}
+
+	// Make script executable
+	scriptPath := filepath.Join(skillDir, "scripts", "check-setup.sh")
+	if err := os.Chmod(scriptPath, 0755); err != nil {
 		return err
 	}
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	return os.WriteFile(skillPath, []byte(GetAgmdMigrateSkillTemplate()), 0644)
+
+	// Write icon
+	if icon := GetManagingAgmdIcon(); icon != nil {
+		iconPath := filepath.Join(skillDir, "assets", "icon.png")
+		if err := os.WriteFile(iconPath, icon, 0644); err != nil {
+			return fmt.Errorf("failed to write icon: %w", err)
+		}
+	}
+
+	return nil
 }
