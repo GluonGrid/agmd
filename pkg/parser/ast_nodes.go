@@ -1,8 +1,6 @@
 package parser
 
 import (
-	"strings"
-
 	"github.com/yuin/goldmark/ast"
 )
 
@@ -67,12 +65,16 @@ func NewNewItemBlock(itemType, name string) *NewItemBlock {
 	}
 }
 
-// DocsBlock represents :::docs directive
-// It expands to list available doc symlinks in the project
+// DocsBlock represents a :::docs ... :::end block.
+// Each line inside is a bare doc name. Expands to a formatted doc index.
+//
+//	:::docs
+//	svelte-kit
+//	typescript
+//	:::end
 type DocsBlock struct {
 	ast.BaseBlock
-	SearchPath string   // Optional: custom path to search for docs (default: "docs")
-	Names      []string // Optional: explicit doc names to include (filter); empty = all
+	Names []string // doc names listed inside the block; empty = auto-discover
 }
 
 // KindDocsBlock is the kind of DocsBlock
@@ -88,27 +90,21 @@ func (n *DocsBlock) Dump(source []byte, level int) {
 	ast.DumpHelper(n, source, level, nil, nil)
 }
 
-// NewDocsBlock creates a new DocsBlock.
-// arg is either empty (auto-detect), a path (starts with . or /), or space-separated names.
-func NewDocsBlock(arg string) *DocsBlock {
-	if arg == "" {
-		return &DocsBlock{SearchPath: "docs"}
-	}
-	// If it looks like a path, treat as search path override
-	if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") {
-		return &DocsBlock{SearchPath: arg}
-	}
-	// Otherwise treat as space-separated doc names (filter)
-	names := strings.Fields(arg)
-	return &DocsBlock{SearchPath: "docs", Names: names}
+// NewDocsBlock creates an empty DocsBlock ready to collect names.
+func NewDocsBlock() *DocsBlock {
+	return &DocsBlock{}
 }
 
-// SkillsBlock represents :::skills directive
-// Expands to <available_skills> XML block for Agent Skills integration
+// SkillsBlock represents a :::skills ... :::end block.
+// Each line inside is a bare skill name. Expands to <available_skills> XML.
+//
+//	:::skills
+//	managing-agmd
+//	pdf-tools
+//	:::end
 type SkillsBlock struct {
 	ast.BaseBlock
-	SearchPath string   // Path to search for linked skills (default: auto-detect)
-	Names      []string // Optional: explicit skill names to include (filter); empty = all
+	Names []string // skill names listed inside the block; empty = auto-discover
 }
 
 // KindSkillsBlock is the kind of SkillsBlock
@@ -124,17 +120,7 @@ func (n *SkillsBlock) Dump(source []byte, level int) {
 	ast.DumpHelper(n, source, level, nil, nil)
 }
 
-// NewSkillsBlock creates a new SkillsBlock.
-// arg is either empty (auto-detect), a path (starts with . or /), or space-separated names.
-func NewSkillsBlock(arg string) *SkillsBlock {
-	if arg == "" {
-		return &SkillsBlock{}
-	}
-	// If it looks like a path, treat as search path override
-	if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") {
-		return &SkillsBlock{SearchPath: arg}
-	}
-	// Otherwise treat as space-separated skill names (filter)
-	names := strings.Fields(arg)
-	return &SkillsBlock{Names: names}
+// NewSkillsBlock creates an empty SkillsBlock ready to collect names.
+func NewSkillsBlock() *SkillsBlock {
+	return &SkillsBlock{}
 }

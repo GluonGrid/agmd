@@ -98,6 +98,90 @@ func RemoveFromDirective(content []byte, itemType, name string) ([]byte, error) 
 	return nil, fmt.Errorf("%s '%s' not found in directives.md", itemType, name)
 }
 
+// AddToDocsBlock adds a doc name to the :::docs ... :::end block in directives.md.
+// If no :::docs block exists, it creates one at the end of the file.
+func AddToDocsBlock(content []byte, name string) ([]byte, error) {
+	return addToNamedBlock(content, ":::docs", name)
+}
+
+// RemoveFromDocsBlock removes a doc name from the :::docs ... :::end block.
+func RemoveFromDocsBlock(content []byte, name string) ([]byte, error) {
+	return removeFromNamedBlock(content, ":::docs", name)
+}
+
+// AddToSkillsBlock adds a skill name to the :::skills ... :::end block in directives.md.
+// If no :::skills block exists, it creates one at the end of the file.
+func AddToSkillsBlock(content []byte, name string) ([]byte, error) {
+	return addToNamedBlock(content, ":::skills", name)
+}
+
+// RemoveFromSkillsBlock removes a skill name from the :::skills ... :::end block.
+func RemoveFromSkillsBlock(content []byte, name string) ([]byte, error) {
+	return removeFromNamedBlock(content, ":::skills", name)
+}
+
+// addToNamedBlock adds a bare name line to a :::TAG ... :::end block.
+// Creates the block at the end of the file if not found.
+func addToNamedBlock(content []byte, tag, name string) ([]byte, error) {
+	openPattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(tag) + `\s*$`)
+	endPattern := regexp.MustCompile(`(?m)^:::end$`)
+
+	openMatch := openPattern.FindIndex(content)
+	if openMatch != nil {
+		searchStart := openMatch[1]
+		endMatch := endPattern.FindIndex(content[searchStart:])
+		if endMatch == nil {
+			return nil, fmt.Errorf("found %s but no matching :::end", tag)
+		}
+		insertPos := searchStart + endMatch[0]
+		blockContent := content[openMatch[1]:insertPos]
+		if containsLine(blockContent, name) {
+			return nil, fmt.Errorf("'%s' already in %s block", name, tag)
+		}
+		var buf bytes.Buffer
+		buf.Write(content[:insertPos])
+		buf.WriteString(name + "\n")
+		buf.Write(content[insertPos:])
+		return buf.Bytes(), nil
+	}
+
+	// No block found — create one at end
+	var buf bytes.Buffer
+	buf.Write(content)
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(tag + "\n")
+	buf.WriteString(name + "\n")
+	buf.WriteString(":::end\n")
+	return buf.Bytes(), nil
+}
+
+// removeFromNamedBlock removes a bare name line from a :::TAG ... :::end block.
+func removeFromNamedBlock(content []byte, tag, name string) ([]byte, error) {
+	openPattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(tag) + `\s*$`)
+	endPattern := regexp.MustCompile(`(?m)^:::end$`)
+
+	openMatch := openPattern.FindIndex(content)
+	if openMatch != nil {
+		searchStart := openMatch[1]
+		endMatch := endPattern.FindIndex(content[searchStart:])
+		if endMatch != nil {
+			blockStart := openMatch[1]
+			blockEnd := searchStart + endMatch[0]
+			removed, found := removeLine(content[blockStart:blockEnd], name)
+			if found {
+				var buf bytes.Buffer
+				buf.Write(content[:blockStart])
+				buf.Write(removed)
+				buf.Write(content[blockEnd:])
+				return buf.Bytes(), nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("'%s' not found in %s block", name, tag)
+}
+
 // containsLine checks if a line exists in content
 func containsLine(content []byte, line string) bool {
 	scanner := bufio.NewScanner(bytes.NewReader(content))

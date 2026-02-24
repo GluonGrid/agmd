@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agmd/pkg/markdown"
 	"agmd/pkg/registry"
 
 	"github.com/fatih/color"
@@ -518,6 +519,9 @@ func runDocLink(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Update :::docs block in directives.md
+	updateDirectivesDocsBlock(name, true, blue)
+
 	return nil
 }
 
@@ -572,6 +576,9 @@ func runDocUnlink(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s Failed to update project config: %v\n", blue("ℹ"), err)
 		}
 	}
+
+	// Update :::docs block in directives.md
+	updateDirectivesDocsBlock(name, false, blue)
 
 	return nil
 }
@@ -628,6 +635,36 @@ func copyDir(src, dst string) (int, error) {
 		fileCount++
 		return os.Chmod(dstPath, info.Mode())
 	})
+}
+
+// updateDirectivesDocsBlock adds or removes a doc name from the :::docs block
+// in directives.md. add=true adds, add=false removes. Prints info on failure.
+func updateDirectivesDocsBlock(name string, add bool, blue func(...interface{}) string) {
+	const directivesFile = "directives.md"
+	content, err := os.ReadFile(directivesFile)
+	if err != nil {
+		// No directives.md in current dir — skip silently
+		return
+	}
+	var updated []byte
+	if add {
+		updated, err = markdown.AddToDocsBlock(content, name)
+	} else {
+		updated, err = markdown.RemoveFromDocsBlock(content, name)
+	}
+	if err != nil {
+		fmt.Printf("%s Could not update %s: %v\n", blue("ℹ"), directivesFile, err)
+		return
+	}
+	if err := os.WriteFile(directivesFile, updated, 0644); err != nil {
+		fmt.Printf("%s Could not write %s: %v\n", blue("ℹ"), directivesFile, err)
+		return
+	}
+	if add {
+		fmt.Printf("%s Added '%s' to :::docs block in %s\n", blue("ℹ"), name, directivesFile)
+	} else {
+		fmt.Printf("%s Removed '%s' from :::docs block in %s\n", blue("ℹ"), name, directivesFile)
+	}
 }
 
 func addToGitignore(path string) error {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agmd/pkg/markdown"
 	"agmd/pkg/registry"
 	"agmd/pkg/skills"
 
@@ -383,6 +384,9 @@ func runSkillLink(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s Linked (%s)\n", green("ok"), t)
 	}
 
+	// Update :::skills block in directives.md
+	updateDirectivesSkillsBlock(skillName, true, blue)
+
 	return nil
 }
 
@@ -406,6 +410,9 @@ func runSkillUnlink(cmd *cobra.Command, args []string) error {
 		fmt.Printf("No symlinks found for skill '%s'\n", skillName)
 	} else {
 		fmt.Printf("%s Unlinked '%s'\n", green("ok"), skillName)
+		// Update :::skills block in directives.md
+		blue := color.New(color.FgBlue).SprintFunc()
+		updateDirectivesSkillsBlock(skillName, false, blue)
 	}
 	return nil
 }
@@ -498,4 +505,33 @@ func copySkillDir(src, dst string) error {
 		}
 		return os.WriteFile(target, data, info.Mode())
 	})
+}
+
+// updateDirectivesSkillsBlock adds or removes a skill name from the :::skills block
+// in directives.md. add=true adds, add=false removes. Prints info on failure.
+func updateDirectivesSkillsBlock(name string, add bool, blue func(...interface{}) string) {
+	const directivesFile = "directives.md"
+	content, err := os.ReadFile(directivesFile)
+	if err != nil {
+		return // No directives.md in current dir — skip silently
+	}
+	var updated []byte
+	if add {
+		updated, err = markdown.AddToSkillsBlock(content, name)
+	} else {
+		updated, err = markdown.RemoveFromSkillsBlock(content, name)
+	}
+	if err != nil {
+		fmt.Printf("%s Could not update %s: %v\n", blue("ℹ"), directivesFile, err)
+		return
+	}
+	if err := os.WriteFile(directivesFile, updated, 0644); err != nil {
+		fmt.Printf("%s Could not write %s: %v\n", blue("ℹ"), directivesFile, err)
+		return
+	}
+	if add {
+		fmt.Printf("%s Added '%s' to :::skills block in %s\n", blue("ℹ"), name, directivesFile)
+	} else {
+		fmt.Printf("%s Removed '%s' from :::skills block in %s\n", blue("ℹ"), name, directivesFile)
+	}
 }

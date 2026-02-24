@@ -50,12 +50,13 @@ workflow:commit
 :::new type:name         # Define inline content (promote to registry later)
 content here...
 :::end
-:::docs                  # All linked docs in ./docs/ (auto-detect)
-:::docs svelte ts        # Only named docs (explicit filter)
-:::docs ./reference      # Custom path
-:::skills                # All linked skills (auto-detect .claude/ or .agents/)
-:::skills managing-agmd  # Only named skills (explicit filter)
-:::skills .claude/skills # Custom path
+:::docs                  # Expand linked docs (managed by agmd doc link/unlink)
+svelte-kit
+typescript
+:::end
+:::skills                # Expand linked skills (managed by agmd skill link/unlink)
+managing-agmd
+:::end
 ` + "```" + `
 
 ### Commands for AI Assistants

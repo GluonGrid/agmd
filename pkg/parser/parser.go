@@ -28,6 +28,9 @@ var directiveDataKey = parser.NewContextKey()
 // itemRe matches "type:name" entries; name may include path segments
 var itemRe = regexp.MustCompile(`^([a-z0-9-]+):([a-z0-9/_-]+)$`)
 
+// nameRe matches bare names (no colon) — used for :::docs and :::skills body lines
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
 func (b *directiveParser) Trigger() []byte {
 	return []byte{':'}
 }
@@ -39,6 +42,8 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 	if !bytes.HasPrefix(line, []byte(":::")) {
 		return nil, parser.NoChildren
 	}
+
+	trimmed := bytes.TrimSpace(line)
 
 	// :::use TYPE:NAME — single item, no :::end needed
 	// Example: :::use rule:typescript
@@ -62,7 +67,6 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 	//   rule:typescript
 	//   workflow:commit
 	//   :::end
-	trimmed := bytes.TrimSpace(line)
 	if bytes.Equal(trimmed, []byte(":::list")) {
 		node := NewListBlock()
 		pc.Set(directiveDataKey, &directiveData{node})
@@ -83,36 +87,30 @@ func (b *directiveParser) Open(parent ast.Node, reader text.Reader, pc parser.Co
 		return node, parser.HasChildren
 	}
 
-	// :::docs [names|path] — single line directive
-	// Examples: :::docs                        → all linked docs
-	//           :::docs svelte-packages ts     → explicit names (filter)
-	//           :::docs ./reference            → custom path
-	docsRe := regexp.MustCompile(`^:::docs(?:\s+(.+))?`)
-	if match := docsRe.FindSubmatch(line); match != nil {
-		arg := ""
-		if len(match) > 1 && match[1] != nil {
-			arg = string(bytes.TrimSpace(match[1]))
-		}
-		node := NewDocsBlock(arg)
+	// :::docs — multi-line block, each line is a bare doc name, needs :::end
+	// Example:
+	//   :::docs
+	//   svelte-kit
+	//   typescript
+	//   :::end
+	if bytes.Equal(trimmed, []byte(":::docs")) {
+		node := NewDocsBlock()
 		pc.Set(directiveDataKey, &directiveData{node})
 		advanceLine(reader, line, segment)
-		return node, parser.NoChildren | parser.Continue
+		return node, parser.NoChildren
 	}
 
-	// :::skills [names|path] — single line directive
-	// Examples: :::skills                      → all linked skills
-	//           :::skills managing-agmd pdf    → explicit names (filter)
-	//           :::skills .claude/skills       → custom path
-	skillsRe := regexp.MustCompile(`^:::skills(?:\s+(.+))?`)
-	if match := skillsRe.FindSubmatch(line); match != nil {
-		arg := ""
-		if len(match) > 1 && match[1] != nil {
-			arg = string(bytes.TrimSpace(match[1]))
-		}
-		node := NewSkillsBlock(arg)
+	// :::skills — multi-line block, each line is a bare skill name, needs :::end
+	// Example:
+	//   :::skills
+	//   managing-agmd
+	//   pdf-tools
+	//   :::end
+	if bytes.Equal(trimmed, []byte(":::skills")) {
+		node := NewSkillsBlock()
 		pc.Set(directiveDataKey, &directiveData{node})
 		advanceLine(reader, line, segment)
-		return node, parser.NoChildren | parser.Continue
+		return node, parser.NoChildren
 	}
 
 	return nil, parser.NoChildren
@@ -122,18 +120,12 @@ func (b *directiveParser) Continue(node ast.Node, reader text.Reader, pc parser.
 	line, segment := reader.PeekLine()
 	trimmed := bytes.TrimSpace(line)
 
-	// Single-line directives close immediately
-	switch node.(type) {
-	case *DocsBlock, *SkillsBlock:
-		return parser.Close
-	}
-
 	// :::use blocks (single item, pre-populated) close immediately
 	if listBlock, ok := node.(*ListBlock); ok && listBlock.isSingleUse {
 		return parser.Close
 	}
 
-	// Check for :::end
+	// Check for :::end — closes :::list, :::docs, :::skills, :::new
 	if bytes.Equal(trimmed, []byte(":::end")) {
 		advanceLine(reader, line, segment)
 		return parser.Close
@@ -150,6 +142,32 @@ func (b *directiveParser) Continue(node ast.Node, reader text.Reader, pc parser.
 				})
 			}
 			// silently skip lines that don't match type:name (comments, blanks, etc.)
+		}
+		advanceLine(reader, line, segment)
+		return parser.Continue | parser.NoChildren
+	}
+
+	// Handle :::docs block — collect bare name lines
+	if docsBlock, ok := node.(*DocsBlock); ok {
+		name := string(trimmed)
+		if name != "" && !strings.HasPrefix(name, ":::") {
+			if nameRe.MatchString(name) {
+				docsBlock.Names = append(docsBlock.Names, name)
+			}
+			// silently skip lines that don't look like names
+		}
+		advanceLine(reader, line, segment)
+		return parser.Continue | parser.NoChildren
+	}
+
+	// Handle :::skills block — collect bare name lines
+	if skillsBlock, ok := node.(*SkillsBlock); ok {
+		name := string(trimmed)
+		if name != "" && !strings.HasPrefix(name, ":::") {
+			if nameRe.MatchString(name) {
+				skillsBlock.Names = append(skillsBlock.Names, name)
+			}
+			// silently skip lines that don't look like names
 		}
 		advanceLine(reader, line, segment)
 		return parser.Continue | parser.NoChildren

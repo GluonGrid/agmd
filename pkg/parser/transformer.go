@@ -98,74 +98,49 @@ func (t *DirectiveTransformer) loadItemContent(itemType, name string) (string, e
 	return readItem(t.RegistryPath)
 }
 
-// expandDocsBlock expands :::docs by detecting doc symlinks in project
+// expandDocsBlock expands :::docs ... :::end into a formatted doc index.
+// Names listed in the block are resolved as symlinks under ./docs/.
 func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
-	searchPath := docsBlock.SearchPath
+	const searchPath = "docs"
 
-	// Check if the search path exists
-	info, err := os.Stat(searchPath)
-	if err != nil || !info.IsDir() {
-		// No docs directory found, add a note
+	if len(docsBlock.Names) == 0 {
 		para := ast.NewParagraph()
 		para.AppendChild(para, ast.NewString([]byte("*No documentation linked. Use `agmd doc link <name>` to add documentation.*")))
 		docsBlock.AppendChild(docsBlock, para)
 		return
 	}
 
-	// Find symlinks to doc folders
-	entries, err := os.ReadDir(searchPath)
-	if err != nil {
-		return
-	}
-
 	var docs []docInfo
-	for _, entry := range entries {
-		entryPath := filepath.Join(searchPath, entry.Name())
-
-		// Check if it's a symlink
+	for _, name := range docsBlock.Names {
+		entryPath := filepath.Join(searchPath, name)
 		fileInfo, err := os.Lstat(entryPath)
 		if err != nil {
 			continue
 		}
 
+		var target string
 		if fileInfo.Mode()&os.ModeSymlink != 0 {
-			// It's a symlink - resolve it to absolute path
-			target, err := filepath.EvalSymlinks(entryPath)
+			target, err = filepath.EvalSymlinks(entryPath)
 			if err != nil {
 				continue
 			}
-
-			// Check if target is a directory
-			targetInfo, err := os.Stat(target)
-			if err != nil || !targetInfo.IsDir() {
-				continue
-			}
-
-			// Count files in the doc (use resolved target path)
-			fileCount := countFilesInDir(target)
-
-			docs = append(docs, docInfo{
-				Name:      entry.Name(),
-				Path:      entryPath,
-				Target:    target,
-				FileCount: fileCount,
-			})
+		} else if fileInfo.IsDir() {
+			target = entryPath
+		} else {
+			continue
 		}
-	}
 
-	// Filter by explicit names if provided
-	if len(docsBlock.Names) > 0 {
-		allowed := make(map[string]bool, len(docsBlock.Names))
-		for _, n := range docsBlock.Names {
-			allowed[n] = true
+		targetInfo, err := os.Stat(target)
+		if err != nil || !targetInfo.IsDir() {
+			continue
 		}
-		filtered := docs[:0]
-		for _, d := range docs {
-			if allowed[d.Name] {
-				filtered = append(filtered, d)
-			}
-		}
-		docs = filtered
+
+		docs = append(docs, docInfo{
+			Name:      name,
+			Path:      entryPath,
+			Target:    target,
+			FileCount: countFilesInDir(target),
+		})
 	}
 
 	if len(docs) == 0 {
@@ -180,16 +155,13 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 	heading.AppendChild(heading, ast.NewString([]byte("Available Documentation")))
 	docsBlock.AppendChild(docsBlock, heading)
 
-	// Add path note
 	pathNote := ast.NewParagraph()
 	pathNote.AppendChild(pathNote, ast.NewString([]byte("*Located in `"+searchPath+"/`*")))
 	docsBlock.AppendChild(docsBlock, pathNote)
 
 	for _, doc := range docs {
-		// Try to get description from description.md
 		description := getDocDescription(doc.Target)
 
-		// Build header line: **name** - description (or just **name** if no description)
 		var headerText string
 		if description != "" {
 			headerText = "**" + doc.Name + "** - " + description
@@ -201,7 +173,6 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 		headerPara.AppendChild(headerPara, ast.NewString([]byte(headerText)))
 		docsBlock.AppendChild(docsBlock, headerPara)
 
-		// Build compact tree structure
 		tree := buildCompactTree(doc.Target)
 		if tree != "" {
 			treePara := ast.NewParagraph()
@@ -211,50 +182,37 @@ func (t *DirectiveTransformer) expandDocsBlock(docsBlock *DocsBlock) {
 	}
 }
 
-// expandSkillsBlock expands :::skills into <available_skills> XML block
+// expandSkillsBlock expands :::skills ... :::end into an <available_skills> XML block.
+// Names listed in the block are resolved from the linked skills directory.
 func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
-	searchPath := skillsBlock.SearchPath
-
-	// Auto-detect search path if not specified and no explicit names given
-	if searchPath == "" && len(skillsBlock.Names) == 0 {
-		if _, err := os.Stat(".claude/skills"); err == nil {
-			searchPath = ".claude/skills"
-		} else if _, err := os.Stat(".agents/skills"); err == nil {
-			searchPath = ".agents/skills"
-		} else {
-			// No skills dir found
-			para := ast.NewParagraph()
-			para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill link <name>` to add a skill.*")))
-			skillsBlock.AppendChild(skillsBlock, para)
-			return
-		}
-	} else if searchPath == "" {
-		// Names provided but no explicit path — still auto-detect search path
-		if _, err := os.Stat(".claude/skills"); err == nil {
-			searchPath = ".claude/skills"
-		} else if _, err := os.Stat(".agents/skills"); err == nil {
-			searchPath = ".agents/skills"
-		}
+	if len(skillsBlock.Names) == 0 {
+		para := ast.NewParagraph()
+		para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill link <name>` to add a skill.*")))
+		skillsBlock.AppendChild(skillsBlock, para)
+		return
 	}
 
-	linked, err := skills.FindLinkedSkills(searchPath)
-	if err != nil {
-		linked = nil
+	// Auto-detect skills directory
+	var searchPath string
+	if _, err := os.Stat(".claude/skills"); err == nil {
+		searchPath = ".claude/skills"
+	} else if _, err := os.Stat(".agents/skills"); err == nil {
+		searchPath = ".agents/skills"
 	}
 
-	// Filter by explicit names if provided
-	if len(skillsBlock.Names) > 0 {
-		allowed := make(map[string]bool, len(skillsBlock.Names))
-		for _, n := range skillsBlock.Names {
-			allowed[n] = true
+	// Build a map of all linked skills for lookup
+	allLinked, _ := skills.FindLinkedSkills(searchPath)
+	linkedByName := make(map[string]*skills.LinkedSkill, len(allLinked))
+	for _, s := range allLinked {
+		linkedByName[s.Name] = s
+	}
+
+	// Expand only the names listed in the block, in order
+	var linked []*skills.LinkedSkill
+	for _, name := range skillsBlock.Names {
+		if s, ok := linkedByName[name]; ok {
+			linked = append(linked, s)
 		}
-		filtered := linked[:0]
-		for _, s := range linked {
-			if allowed[s.Name] {
-				filtered = append(filtered, s)
-			}
-		}
-		linked = filtered
 	}
 
 	if len(linked) == 0 {
