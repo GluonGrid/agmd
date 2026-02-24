@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,55 +13,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
-
-// ProjectConfig represents the .agmd.json project configuration
-type ProjectConfig struct {
-	LinkedDocs map[string]string `json:"linked_docs,omitempty"` // name -> path
-}
-
-const projectConfigFile = ".agmd.json"
-
-// loadProjectConfig loads the project config from .agmd.json
-func loadProjectConfig() (*ProjectConfig, error) {
-	config := &ProjectConfig{
-		LinkedDocs: make(map[string]string),
-	}
-
-	data, err := os.ReadFile(projectConfigFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return config, nil // Return empty config
-		}
-		return nil, err
-	}
-
-	if err := json.Unmarshal(data, config); err != nil {
-		return nil, err
-	}
-
-	if config.LinkedDocs == nil {
-		config.LinkedDocs = make(map[string]string)
-	}
-
-	return config, nil
-}
-
-// saveProjectConfig saves the project config to .agmd.json
-func saveProjectConfig(config *ProjectConfig) error {
-	// Don't save empty config
-	if len(config.LinkedDocs) == 0 {
-		// Remove config file if it exists
-		os.Remove(projectConfigFile)
-		return nil
-	}
-
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(projectConfigFile, append(data, '\n'), 0644)
-}
 
 // Shared flags for doc subcommands
 var docForce bool
@@ -508,17 +458,6 @@ func runDocLink(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Track in project config
-	config, err := loadProjectConfig()
-	if err != nil {
-		fmt.Printf("%s Failed to load project config: %v\n", blue("ℹ"), err)
-	} else {
-		config.LinkedDocs[name] = destPath
-		if err := saveProjectConfig(config); err != nil {
-			fmt.Printf("%s Failed to save project config: %v\n", blue("ℹ"), err)
-		}
-	}
-
 	// Update :::docs block in directives.md
 	updateDirectivesDocsBlock(name, true, blue)
 
@@ -531,30 +470,12 @@ func runDocUnlink(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 
-	// First check project config for tracked path
-	config, _ := loadProjectConfig()
+	// Check standard locations for the symlink
 	var foundPath string
-
-	if trackedPath, ok := config.LinkedDocs[name]; ok {
-		// Check if the tracked path still exists as a symlink
-		if info, err := os.Lstat(trackedPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			foundPath = trackedPath
-		}
-	}
-
-	// Fall back to checking common locations
-	if foundPath == "" {
-		possiblePaths := []string{
-			filepath.Join("docs", name),
-			name,
-		}
-
-		for _, path := range possiblePaths {
-			info, err := os.Lstat(path)
-			if err == nil && info.Mode()&os.ModeSymlink != 0 {
-				foundPath = path
-				break
-			}
+	for _, path := range []string{filepath.Join("docs", name), name} {
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			foundPath = path
+			break
 		}
 	}
 
@@ -568,14 +489,6 @@ func runDocUnlink(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Unlinked doc:%s (removed %s)\n", green("✓"), name, foundPath)
-
-	// Remove from project config
-	if _, ok := config.LinkedDocs[name]; ok {
-		delete(config.LinkedDocs, name)
-		if err := saveProjectConfig(config); err != nil {
-			fmt.Printf("%s Failed to update project config: %v\n", blue("ℹ"), err)
-		}
-	}
 
 	// Update :::docs block in directives.md
 	updateDirectivesDocsBlock(name, false, blue)
