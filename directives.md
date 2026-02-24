@@ -17,22 +17,6 @@
 :::use guide:long-running-tasks
 :::use pattern:operational-learnings
 
-## Python/Django Development
-
-:::use guide:docker-python-dev
-:::use guide:pytest-best-practices
-
-## Development Tools
-
-:::use tool:uv
-:::use tool:repofetch
-:::use tool:boila
-
-## Docs available
-
-:::docs
-:::end
-
 ## Skills available
 
 :::skills
