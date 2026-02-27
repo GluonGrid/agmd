@@ -235,7 +235,7 @@ func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
 		sb.WriteString(fmt.Sprintf("  <skill>\n"))
 		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", xmlEscape(s.Name)))
 		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", xmlEscape(s.Description)))
-		sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", absPath))
+		sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", tildeHome(absPath)))
 		sb.WriteString(fmt.Sprintf("  </skill>\n"))
 	}
 	sb.WriteString("</available_skills>")
@@ -243,6 +243,18 @@ func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
 	para := ast.NewParagraph()
 	para.AppendChild(para, ast.NewString([]byte(sb.String())))
 	skillsBlock.AppendChild(skillsBlock, para)
+}
+
+// tildeHome replaces the user's home directory prefix with ~ for display.
+func tildeHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
+	}
+	return path
 }
 
 // xmlEscape escapes special XML characters

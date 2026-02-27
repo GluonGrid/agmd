@@ -70,7 +70,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	if !reg.Exists() {
 		return fmt.Errorf("registry not found at %s\n%s\nRun 'agmd setup' first to initialize the registry",
-			red(reg.BasePath),
+			red(tildeHome(reg.BasePath)),
 			red("✗"))
 	}
 

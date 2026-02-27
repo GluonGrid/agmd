@@ -54,7 +54,7 @@ func runMv(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 	if !reg.Exists() {
-		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
+		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", tildeHome(reg.BasePath))
 	}
 
 	// Handle --to-global / --to-local (registry migration)

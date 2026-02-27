@@ -43,15 +43,15 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	if reg.Exists() && !setupForce {
-		fmt.Printf("%s Registry already exists: %s\n", yellow("!"), reg.BasePath)
+		fmt.Printf("%s Registry already exists: %s\n", yellow("!"), tildeHome(reg.BasePath))
 		fmt.Println("\nUse --force to reinitialize")
 		return nil
 	}
 
 	if setupForce && reg.Exists() {
-		fmt.Printf("%s Reinitializing: %s\n", yellow("!"), reg.BasePath)
+		fmt.Printf("%s Reinitializing: %s\n", yellow("!"), tildeHome(reg.BasePath))
 	} else {
-		fmt.Printf("%s Creating: %s\n", blue("->"), reg.BasePath)
+		fmt.Printf("%s Creating: %s\n", blue("->"), tildeHome(reg.BasePath))
 	}
 
 	if err := reg.Setup(setupForce); err != nil {

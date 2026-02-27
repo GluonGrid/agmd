@@ -160,7 +160,7 @@ description: ""
 
 	// Open editor unless --no-editor or content was provided
 	if newNoEditor || content != "" {
-		fmt.Printf("%s %s\n", blue("->"), filePath)
+		fmt.Printf("%s %s\n", blue("->"), tildeHome(filePath))
 		return nil
 	}
 

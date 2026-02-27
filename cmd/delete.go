@@ -80,7 +80,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if !reg.Exists() {
-		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
+		return fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", tildeHome(reg.BasePath))
 	}
 
 	// Get item path

@@ -85,7 +85,7 @@ func generateSyncContent(quiet bool) (string, error) {
 	}
 
 	if !reg.Exists() {
-		return "", fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", reg.BasePath)
+		return "", fmt.Errorf("registry not found at %s\nRun 'agmd setup' first", tildeHome(reg.BasePath))
 	}
 
 	// Check for :::new blocks - they must be promoted first

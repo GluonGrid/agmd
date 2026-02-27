@@ -125,7 +125,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("%s\n\n", cyan(reg.BasePath))
+	fmt.Printf("%s\n\n", cyan(tildeHome(reg.BasePath)))
 
 	for _, typeName := range types {
 		// Skip reserved types in general listing (they have their own subcommands)
@@ -185,7 +185,7 @@ func runListTree(reg *registry.Registry) error {
 	cyan := color.New(color.FgCyan).SprintFunc()
 	dim := color.New(color.Faint).SprintFunc()
 
-	fmt.Printf("%s\n", cyan(reg.BasePath))
+	fmt.Printf("%s\n", cyan(tildeHome(reg.BasePath)))
 
 	tree := buildRegistryTree(reg.BasePath)
 	printTree(tree, "", true, dim)

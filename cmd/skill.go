@@ -379,7 +379,7 @@ func runSkillLink(cmd *cobra.Command, args []string) error {
 			os.Remove(linkPath)
 		}
 
-		fmt.Printf("%s Linking %s → %s\n", blue("->"), linkPath, absSkillPath)
+		fmt.Printf("%s Linking %s → %s\n", blue("->"), linkPath, tildeHome(absSkillPath))
 		if err := os.Symlink(absSkillPath, linkPath); err != nil {
 			return fmt.Errorf("failed to create symlink: %w", err)
 		}
@@ -435,7 +435,7 @@ func runSkillDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if !skillDeleteForce {
-		fmt.Printf("%s Delete skill '%s' at %s? (y/N): ", red("!"), skillName, skill.Path)
+		fmt.Printf("%s Delete skill '%s' at %s? (y/N): ", red("!"), skillName, tildeHome(skill.Path))
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(strings.TrimSpace(response)) != "y" {
