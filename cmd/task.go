@@ -1248,10 +1248,8 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 	if taskFeature != "" {
 		optionalLines += fmt.Sprintf("feature: %s\n", taskFeature)
 	}
-	// Only include priority if non-default (not P2)
-	if taskPriority != 2 {
-		optionalLines += fmt.Sprintf("priority: %d\n", taskPriority)
-	}
+	// Always write priority so it round-trips correctly (0 = P0 critical, 2 = P2 default)
+	optionalLines += fmt.Sprintf("priority: %d\n", taskPriority)
 	// Only include type if non-default (not "task")
 	if taskType != "task" {
 		optionalLines += fmt.Sprintf("type: %s\n", taskType)

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var rootCmd = &cobra.Command{
@@ -67,6 +68,31 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// ExecuteArgs runs agmd with the given arguments and returns any error.
+// Unlike Execute(), it does not call os.Exit — intended for use in tests.
+func ExecuteArgs(args []string) error {
+	resetFlags(rootCmd)
+	rootCmd.SetArgs(args)
+	return rootCmd.Execute()
+}
+
+// resetFlags resets all flags on cmd and its subcommands to their default values.
+// This is required for in-process testing where the same Cobra command tree is
+// reused across multiple Execute() calls and flags would otherwise retain values.
+func resetFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		f.Value.Set(f.DefValue) //nolint:errcheck
+		f.Changed = false
+	})
+	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+		f.Value.Set(f.DefValue) //nolint:errcheck
+		f.Changed = false
+	})
+	for _, sub := range cmd.Commands() {
+		resetFlags(sub)
 	}
 }
 

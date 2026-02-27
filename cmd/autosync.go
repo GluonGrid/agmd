@@ -25,13 +25,19 @@ func autoSyncRegistryFilenames(reg *registry.Registry) {
 }
 
 func syncDirectory(baseDir string) {
-	filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
-			return nil
+	// Only process top-level .md files — skills and other multi-file packages
+	// live in subdirectories (e.g. skill/managing-agmd/SKILL.md) and must not
+	// be renamed by this auto-sync logic.
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
 		}
-		syncFileSilently(path, baseDir)
-		return nil
-	})
+		syncFileSilently(filepath.Join(baseDir, entry.Name()), baseDir)
+	}
 }
 
 func syncFileSilently(filePath string, baseDir string) {

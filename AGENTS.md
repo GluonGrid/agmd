@@ -8,21 +8,17 @@ This project uses **agmd** to manage AI instructions. The source file is `direct
 
 ```markdown
 :::use type:name         # Include a single item from ~/.agmd/type/name.md
-
 :::list                  # Include multiple items (mixed types)
 rule:typescript
 workflow:commit
 :::end
-
 :::new type:name         # Define inline content (promote to registry later)
 content here...
 :::end
-
 :::docs                  # Expand linked docs (managed by agmd doc link/unlink)
 svelte-kit
 typescript
 :::end
-
 :::skills                # Expand linked skills (managed by agmd skill link/unlink)
 managing-agmd
 :::end
@@ -128,7 +124,6 @@ agmd new rule:my-rule --local    # Create item in local registry (overrides glob
 | `agmd collect` | Project already uses agmd (has `directives.md`) | Registry items → `~/.agmd/` for reuse |
 
 Quick migration flow:
-
 ```bash
 agmd migrate CLAUDE.md   # creates directives.md, opens editor
 # wrap sections with :::new ... :::end in editor, then:
@@ -138,7 +133,6 @@ agmd symlink --target claude  # symlink AGENTS.md → CLAUDE.md (if needed)
 ```
 
 The built-in `managing-agmd` skill provides detailed step-by-step guidance. Link it with:
-
 ```bash
 agmd skill link managing-agmd
 ```
@@ -660,6 +654,74 @@ tmux kill-session -t myproject-build
 - Prevents repeated mistakes
 - Speeds up onboarding
 - Documents tribal knowledge
+
+## Development
+
+# agmd CLI Integration Test Patterns
+
+## Test Infrastructure
+
+### In-Process Testing
+Tests call `cmd.ExecuteArgs(args)` directly — no subprocess, no binary build required.
+Output is captured via `os.Pipe()` redirect of stdout/stderr.
+
+### Key Helpers (tests/integration/helpers_test.go)
+```go
+run(t, "cmd", "arg")          // run, return output (ignores error)
+runE(t, "cmd", "arg")         // run, return (output, error)
+setup(t)                       // fresh AGMD_HOME registry, returns path
+chdir(t)                       // temp CWD, auto-restored on cleanup
+fileExists(path)               // uses os.Lstat — detects symlinks too
+readFile(t, path)              // fatal if missing
+```
+
+### Flag Reset (cmd/root.go: ExecuteArgs)
+Cobra does NOT reset flag values between Execute() calls.
+`resetFlags(rootCmd)` is called before each ExecuteArgs to reset all
+flags to their DefValue and clear f.Changed — prevents cross-test pollution
+when global vars are shared between subcommands (e.g. docForce, taskForce).
+
+## Writing New Tests
+
+### Pattern
+```go
+func TestX_YScenario(t *testing.T) {
+    registry := setup(t)   // fresh AGMD_HOME
+    dir := chdir(t)        // fresh CWD (required for path-sensitive commands)
+
+    run(t, "cmd", "subcmd", "--flag")
+
+    if !fileExists(filepath.Join(dir, ".agents", "skills", "foo")) {
+        t.Error("expected foo to exist")
+    }
+}
+```
+
+### Commands Requiring --force
+These commands prompt for confirmation; always pass --force in tests:
+- `delete <type:name> --force`
+- `doc delete <name> --force`
+- `file delete <name> --force`
+- `task delete <name> --force`
+- `task clean --force`
+- `skill delete <name> --force`
+
+### Commands Requiring EDITOR=true
+Commands that open an editor must set `t.Setenv("EDITOR", "true")` to avoid blocking:
+- `migrate`
+- `new` (without --no-editor or --content)
+
+### Symlinks and fileExists
+fileExists uses os.Lstat to detect symlinks even when the target doesn't exist.
+This is critical for copilot (`.github/copilot-instructions.md → AGENTS.md`)
+where the target is relative and doesn't exist in a fresh test directory.
+
+## Bugs Found During Test Writing
+- `collect.go writeItemToRegistry`: missing MkdirAll for known types — fixed
+- `task.go`: priority omitted from YAML when == 2 (default), causing P2 tasks
+  to be read back as P0. Fixed by always writing priority field.
+- Cobra flag leakage between in-process test calls — fixed via resetFlags()
+- `fileExists` using os.Stat follows symlinks — fixed to use os.Lstat
 
 ## Skills available
 

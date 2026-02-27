@@ -17,6 +17,10 @@
 :::use guide:long-running-tasks
 :::use pattern:operational-learnings
 
+## Development
+
+:::use guideline:agmd-cli-test
+
 ## Skills available
 
 :::skills

@@ -199,9 +199,9 @@ func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
 	} else if _, err := os.Stat(".agents/skills"); err == nil {
 		searchPath = ".agents/skills"
 	}
-
 	// Build a map of all linked skills for lookup
-	allLinked, _ := skills.FindLinkedSkills(searchPath)
+	allLinked, err := skills.FindLinkedSkills(searchPath)
+	_ = err
 	linkedByName := make(map[string]*skills.LinkedSkill, len(allLinked))
 	for _, s := range allLinked {
 		linkedByName[s.Name] = s
@@ -214,7 +214,6 @@ func (t *DirectiveTransformer) expandSkillsBlock(skillsBlock *SkillsBlock) {
 			linked = append(linked, s)
 		}
 	}
-
 	if len(linked) == 0 {
 		para := ast.NewParagraph()
 		para.AppendChild(para, ast.NewString([]byte("*No skills linked. Use `agmd skill link <name>` to add a skill.*")))

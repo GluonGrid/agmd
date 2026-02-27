@@ -7,14 +7,19 @@ import (
 	"strings"
 )
 
-// New creates a new Registry instance, auto-detecting a project-local .agmd/ in CWD
+// New creates a new Registry instance, auto-detecting a project-local .agmd/ in CWD.
+// The global registry path defaults to ~/.agmd but can be overridden with AGMD_HOME.
 func New() (*Registry, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	var basePath string
+	if override := os.Getenv("AGMD_HOME"); override != "" {
+		basePath = override
+	} else {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		}
+		basePath = filepath.Join(homeDir, ".agmd")
 	}
-
-	basePath := filepath.Join(homeDir, ".agmd")
 
 	// Auto-detect project-local .agmd/ in CWD
 	var localPath string

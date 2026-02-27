@@ -35,6 +35,7 @@ In directives.md, use :::skills to generate the <available_skills> XML block:
 
 var skillInstallLocal bool
 var skillInstallName string
+var skillDeleteForce bool
 
 var skillInstallCmd = &cobra.Command{
 	Use:   "install <owner/repo> [subdir]",
@@ -126,6 +127,7 @@ func init() {
 	skillInstallCmd.Flags().BoolVar(&skillInstallLocal, "local", false, "Install to project-local .agmd/ instead of ~/.agmd/")
 	skillInstallCmd.Flags().StringVar(&skillInstallName, "name", "", "Override skill name (default: repo or subdir name)")
 	skillLinkCmd.Flags().StringVar(&skillLinkTarget, "target", "", "Link target: claude, agents, or both (default: auto-detect)")
+	skillDeleteCmd.Flags().BoolVar(&skillDeleteForce, "force", false, "Skip confirmation prompt")
 }
 
 // --- helpers ---
@@ -432,11 +434,13 @@ func runSkillDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("%s Delete skill '%s' at %s? (y/N): ", red("!"), skillName, skill.Path)
-	var response string
-	fmt.Scanln(&response)
-	if strings.ToLower(strings.TrimSpace(response)) != "y" {
-		return fmt.Errorf("cancelled")
+	if !skillDeleteForce {
+		fmt.Printf("%s Delete skill '%s' at %s? (y/N): ", red("!"), skillName, skill.Path)
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(strings.TrimSpace(response)) != "y" {
+			return fmt.Errorf("cancelled")
+		}
 	}
 
 	if err := os.RemoveAll(skill.Path); err != nil {

@@ -74,18 +74,20 @@ func parseDirectivesStructure(content string) ([]DirectivesSection, error) {
 			continue
 		}
 
-		// Detect :::list (mixed, no type on directive line)
+		// Detect :::list (bare, items are type:name on subsequent lines)
 		if listRe.MatchString(line) {
 			inList = true
 			continue
 		}
 
-		// Detect :::use TYPE:NAME (single item)
+		// Detect :::use TYPE:NAME (single-item directive)
 		if match := useRe.FindStringSubmatch(line); match != nil {
 			itemType := match[1]
 			itemName := match[2]
 			if currentSection != nil {
-				currentSection.ItemType = itemType
+				if currentSection.ItemType == "" {
+					currentSection.ItemType = itemType
+				}
 				currentSection.ItemNames = append(currentSection.ItemNames, itemName)
 			}
 			continue

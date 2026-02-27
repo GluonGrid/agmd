@@ -201,20 +201,9 @@ func runCollect(cmd *cobra.Command, args []string) error {
 // writeItemToRegistry writes an extracted item to the registry
 func writeItemToRegistry(reg *registry.Registry, item importer.ImportedItem) error {
 	// Determine target directory
-	var targetDir string
-	switch item.Type {
-	case "rule":
-		targetDir = reg.TypePath("rule")
-	case "workflow":
-		targetDir = reg.TypePath("workflow")
-	case "guideline":
-		targetDir = reg.TypePath("guideline")
-	default:
-		// Custom type - create directory if needed
-		targetDir = filepath.Join(reg.BasePath, item.Type)
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory for type '%s': %w", item.Type, err)
-		}
+	targetDir := reg.TypePath(item.Type)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory for type '%s': %w", item.Type, err)
 	}
 
 	// Create file path
