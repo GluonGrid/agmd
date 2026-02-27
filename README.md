@@ -23,12 +23,13 @@ Every project needs an `AGENTS.md` or `CLAUDE.md` file to guide AI coding assist
 
 ## The Solution
 
-agmd introduces a simple two-file system:
+agmd introduces a directive-based system:
 
 ```
 your-project/
-├── directives.md   # What you edit (compact references)
-└── AGENTS.md       # What AI reads (expanded content)
+├── directives.md        # What you edit (compact references)
+├── directives.local.md  # Personal overrides (gitignored, optional)
+└── AGENTS.md            # What AI reads (expanded content, or served via hooks)
 ```
 
 Your `directives.md` stays clean and scannable:
@@ -52,7 +53,7 @@ guideline:testing
 :::end
 ```
 
-Run `agmd sync` and it expands to a full `AGENTS.md` with all the content.
+Run `agmd sync` and it expands to a full `AGENTS.md` with all the content — or use `agmd sync --stdout` with hooks for a file-less workflow.
 
 ## Quick Start
 
@@ -125,11 +126,14 @@ Your custom content here
 ### 3. Sync Everywhere
 
 ```bash
-agmd sync  # Expands directives.md → AGENTS.md
+agmd sync              # Expands directives.md → AGENTS.md (file on disk)
+agmd sync --stdout     # Print expanded content to stdout (for hooks)
+agmd sync --diff       # Print only changes since last sync (unified diff)
 ```
 
 - `:::use` and `:::list` directives expand to full content from registry
 - `:::new` blocks must be promoted first with `agmd promote`
+- `--stdout` and `--diff` enable a file-less workflow via hooks (no AGENTS.md on disk)
 
 Update a rule in your registry, run `agmd sync` in each project, done.
 
@@ -140,6 +144,8 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd setup` | Initialize your `~/.agmd/` registry |
 | `agmd init [profile:name]` | Create `directives.md` in current project |
 | `agmd sync` | Generate `AGENTS.md` from `directives.md` |
+| `agmd sync --stdout` | Print expanded content to stdout (for hooks) |
+| `agmd sync --diff` | Print only changes since last sync (unified diff) |
 | `agmd edit [type:name]` | Edit `directives.md` (default) or a registry item |
 | `agmd new type:name` | Create a new item in the registry |
 | `agmd show type:name` | Display item content (useful for AI assistants) |
@@ -150,6 +156,7 @@ Update a rule in your registry, run `agmd sync` in each project, done.
 | `agmd task <action>` | Manage project tasks (list, new, show, delete, status, ...) |
 | `agmd file <action>` | Manage raw files - scripts, configs (list, new, add, show, delete) |
 | `agmd doc <action>` | Manage documentation folders (list, add, show, delete, link, unlink) |
+| `agmd skill <action>` | Manage AI skills (link, unlink, list) |
 | `agmd git <args>` | Run any git command in `~/.agmd` from anywhere |
 
 ## Migrating Existing Projects
@@ -216,17 +223,35 @@ agmd init profile:svelte-kit
 
 Profiles are complete `directives.md` templates for specific tech stacks.
 
+## Hook-Based Workflow (File-less)
+
+For Claude Code, you can skip AGENTS.md entirely and serve content via hooks:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "agmd sync --stdout"
+      }]
+    }]
+  }
+}
+```
+
+Add this to `.claude/settings.json` (project) or `~/.claude/settings.json` (global). The agent gets fresh context at every session start and after compaction — no AGENTS.md file needed.
+
 ## Works With Any AI Assistant
 
 agmd generates standard markdown that works with:
 
-- **Claude Code** (`CLAUDE.md`)
+- **Claude Code** (`CLAUDE.md` or hooks)
 - **Cursor** (`.cursorrules` or project instructions)
 - **Windsurf** (project context)
 - **GitHub Copilot** (repository context)
 - **Any AI** that reads markdown instructions
-
-Use `agmd symlink` to create the appropriate files for your toolchain.
 
 ## Example Workflow
 
@@ -280,6 +305,7 @@ Some types have special behavior and dedicated subcommands:
 | `task` | `agmd task` | Project tasks with dependencies |
 | `file` | `agmd file` | Raw files without markdown processing |
 | `doc` | `agmd doc` | Documentation folders (symlinked) |
+| `skill` | `agmd skill` | Multi-file AI skills |
 | `profile` | `agmd init profile:name` | Project templates |
 
 Use `agmd new type:name` for all other types (rule, workflow, guideline, prompt, etc.).
@@ -436,7 +462,7 @@ agmd task clean                           # Delete all completed tasks
 **Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
 **Task types:** bug, feature, task (default, hidden), chore
 
-Tasks are stored in `.agmd.json` at project root and auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Use `--feature` to scope tasks to features. The `--status`, `--priority`, and `--type` flags filter the list. Dependencies via `--blocked-by` are validated on creation.
+Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Use `--feature` to scope tasks to features. The `--status`, `--priority`, and `--type` flags filter the list. Dependencies via `--blocked-by` are validated on creation.
 
 ## File Management
 
@@ -493,6 +519,32 @@ Use the `:::docs` directive in `directives.md` to automatically list linked docu
 :::docs ./ref     # Lists symlinked docs in ./ref/
 ```
 
+## Skills
+
+Bundle reusable multi-file capabilities that AI agents can discover and use:
+
+```bash
+# Link a skill into the current project
+agmd skill link managing-agmd
+
+# List linked skills
+agmd skill list
+
+# Unlink a skill
+agmd skill unlink managing-agmd
+```
+
+Skills are stored in `~/.agmd/skill/` and can contain multiple files. Use the `:::skills` directive in `directives.md` to list available skills:
+
+```markdown
+:::skills
+managing-agmd
+my-other-skill
+:::end
+```
+
+Linked skills are automatically discovered by AI agents during sessions.
+
 ## AI Assistant Integration
 
 agmd is designed to be used by AI coding assistants. All commands support non-interactive modes:
@@ -514,6 +566,10 @@ agmd file new script.sh --content "#!/bin/bash"
 agmd edit rule:test --content "# Updated content"
 echo "New content" | agmd edit rule:test
 
+# Sync for hooks (no file on disk)
+agmd sync --stdout                 # Full expanded content to stdout
+agmd sync --diff                   # Only changes since last sync
+
 # Task management
 agmd task new setup-db --content "Set up database"
 agmd task status setup-db completed
@@ -524,7 +580,8 @@ agmd task show --all               # Show all tasks with content
 
 Planned features for future releases:
 
-- **Agent Skills support** - Integration with the [Agent Skills](https://agentskills.io) specification for portable, reusable AI agent capabilities
+- **Learning system** - Auto-capture agent learnings into the registry with hook-based context injection
+- **`agmd hooks install`** - Automatic hook configuration for supported AI agents
 - **Multiple output targets** - Support for `directives.test.md` → `TEST.md` and other custom mappings
 - **Registry sharing** - Import/export registries, share rule packs with teams
 

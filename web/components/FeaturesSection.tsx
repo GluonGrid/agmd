@@ -5,7 +5,7 @@ const features = [
     icon: "library_books",
     color: "bg-primary/10 text-primary",
     title: "Personal Registry",
-    description: "Store reusable content in `~/.agmd/`. Create your own types like `rule/`, `workflow/`, or `persona/` to match your needs."
+    description: "Store rules, workflows, tasks, files, docs, and skills in `~/.agmd/`. Create any types you need — plus share team rules via a local `.agmd/` folder."
   },
   {
     icon: "code",
@@ -14,10 +14,10 @@ const features = [
     description: "Learn just 3 directives: `:::use` to reuse single items, `:::list` for mixed groups, and `:::new` to define inline content."
   },
   {
-    icon: "move_up",
+    icon: "sync_alt",
     color: "bg-accent-green/10 text-accent-green",
-    title: "Easy Migration",
-    description: "Got an existing messy `AI_RULES.md`? Run `agmd migrate` to organize it, or `agmd collect` to extract rules into your registry."
+    title: "File or File-less",
+    description: "Generate `AGENTS.md` on disk with `agmd sync`, or go file-less with `--stdout` and `--diff` flags for hook-based workflows."
   }
 ];
 

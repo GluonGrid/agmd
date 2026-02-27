@@ -167,6 +167,8 @@ agmd sync`}</CodeBlock>
           <Card title="agmd setup">Initialize your <code className="text-text-main">~/.agmd/</code> registry.</Card>
           <Card title="agmd init [profile:name]">Create <code className="text-text-main">directives.md</code> in the current project.</Card>
           <Card title="agmd sync">Generate <code className="text-text-main">AGENTS.md</code> from directives.</Card>
+          <Card title="agmd sync --stdout">Print expanded content to stdout (for hooks).</Card>
+          <Card title="agmd sync --diff">Print only changes since last sync (unified diff).</Card>
           <Card title="agmd edit [type:name]">Edit directives or a registry item.</Card>
           <Card title="agmd new type:name">Create a new registry item.</Card>
           <Card title="agmd show type:name">Display item content for assistants.</Card>
@@ -174,6 +176,11 @@ agmd sync`}</CodeBlock>
           <Card title="agmd promote">Promote <code className="text-text-main">:::new</code> blocks into your registry.</Card>
           <Card title="agmd migrate &lt;file&gt;">Convert a raw CLAUDE.md/AGENTS.md into directives.</Card>
           <Card title="agmd collect [-f file]">Collect rules from an agmd project into your registry.</Card>
+          <Card title="agmd task &lt;action&gt;">Manage project tasks with priorities and dependencies.</Card>
+          <Card title="agmd file &lt;action&gt;">Manage raw files — scripts, configs, templates.</Card>
+          <Card title="agmd doc &lt;action&gt;">Manage documentation folders (symlinked into projects).</Card>
+          <Card title="agmd skill &lt;action&gt;">Manage multi-file AI skills (link, unlink, list).</Card>
+          <Card title="agmd git &lt;args&gt;">Run any git command in <code className="text-text-main">~/.agmd</code> from anywhere.</Card>
         </div>
         <div className="mt-10 space-y-6">
           <CommandExample
@@ -312,6 +319,148 @@ agmd new profile:svelte-kit
 agmd init profile:svelte-kit`}</CodeBlock>
           <div className="bg-background-mantle border border-surface-1 rounded-2xl p-6 text-text-sub text-sm leading-relaxed">
             Profiles are complete <code className="text-text-main">directives.md</code> templates, perfect for stack-specific standards.
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="Task Management" subtitle="Track project tasks with priorities, types, and dependencies." />
+        <div className="mt-6">
+          <CodeBlock>{`# Create tasks with priority and type
+agmd task new setup-db --content "Set up database schema"
+agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
+agmd task new add-feature -t feature -p 1 --content "Add dark mode"
+
+# List and filter
+agmd task list                        # All tasks for current project
+agmd task list --type bug --priority 0 # Critical bugs only
+agmd task list --tree                  # Dependency tree view
+agmd task list --feature auth          # Filter by feature
+
+# Update status
+agmd task status setup-db completed
+agmd task edit setup-db --priority 0 --type bug
+
+# Dependencies
+agmd task blocked-by create-api setup-db
+agmd task unblock create-api setup-db`}</CodeBlock>
+        </div>
+        <div className="mt-6 bg-background-mantle border border-surface-1 rounded-2xl p-6 text-text-sub text-sm leading-relaxed">
+          <strong className="text-text-main">Priority levels:</strong> P0 (critical), P1 (high), P2 (medium), P3 (low), P4 (backlog)<br />
+          <strong className="text-text-main">Task types:</strong> bug, feature, task, chore<br />
+          Tasks are stored in <code className="text-text-main">~/.agmd/task/&lt;project&gt;/</code> and auto-sorted by priority.
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="File Management" subtitle="Store raw files (scripts, configs, templates) without markdown processing." />
+        <div className="mt-6">
+          <CodeBlock>{`# Add files to registry
+agmd file new setup.sh --content "#!/bin/bash\\necho hello"
+agmd file add ./scripts/deploy.sh
+
+# List and view
+agmd file list
+agmd file show setup.sh
+
+# Delete
+agmd file delete setup.sh`}</CodeBlock>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="Documentation Folders" subtitle="Symlink multi-file documentation into projects from your registry." />
+        <div className="mt-6">
+          <CodeBlock>{`# Add docs to registry
+agmd doc add ./docs svelte-kit
+
+# Link into project (creates symlink)
+agmd doc link svelte-kit          # Creates docs/svelte-kit -> ~/.agmd/doc/svelte-kit
+
+# Use :::docs directive to list linked docs
+# In directives.md:
+#   :::docs
+#   svelte-kit
+#   :::end
+
+# Unlink
+agmd doc unlink svelte-kit`}</CodeBlock>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="Skills" subtitle="Bundle reusable multi-file capabilities for AI agents." />
+        <div className="mt-6 grid lg:grid-cols-2 gap-6">
+          <CodeBlock>{`# Link a skill into the project
+agmd skill link managing-agmd
+
+# List linked skills
+agmd skill list
+
+# Use :::skills directive
+# In directives.md:
+#   :::skills
+#   managing-agmd
+#   :::end
+
+# Unlink
+agmd skill unlink managing-agmd`}</CodeBlock>
+          <div className="bg-background-mantle border border-surface-1 rounded-2xl p-6 text-text-sub text-sm leading-relaxed">
+            Skills are stored in <code className="text-text-main">~/.agmd/skill/</code> and can contain multiple files. They are automatically discovered by AI agents when linked to a project.
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="Personal Overrides" subtitle="Machine-specific directives that stay out of version control." />
+        <div className="mt-6 grid lg:grid-cols-2 gap-6">
+          <CodeBlock>{`# Create personal overrides (auto-gitignored)
+touch directives.local.md
+
+# Add personal directives
+echo ":::use rule:my-local-tool" >> directives.local.md
+
+# agmd sync automatically merges it`}</CodeBlock>
+          <div className="bg-background-mantle border border-surface-1 rounded-2xl p-6 text-text-sub text-sm leading-relaxed">
+            <code className="text-text-main">directives.local.md</code> is appended after <code className="text-text-main">directives.md</code> during sync. Use it for machine-specific tools, personal preferences, or experimental rules you're testing.
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="Local Registry" subtitle="Share project-specific rules with your team." />
+        <div className="mt-6">
+          <CodeBlock>{`# Create team-shared rules (goes to .agmd/, not ~/.agmd/)
+agmd new rule:our-coding-style --local
+agmd new guide:architecture --local
+
+# Commit with the project
+git add .agmd/ && git commit -m "add team rules"`}</CodeBlock>
+        </div>
+        <div className="mt-6 bg-background-mantle border border-surface-1 rounded-2xl p-6 text-text-sub text-sm leading-relaxed">
+          <strong className="text-text-main">Resolution order</strong> — local takes priority:<br />
+          1. <code className="text-text-main">.agmd/rule/foo.md</code> — project-local (team-shared, committed)<br />
+          2. <code className="text-text-main">~/.agmd/rule/foo.md</code> — global (personal)
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-6 pb-20">
+        <SectionTitle title="Hook-Based Workflow" subtitle="Serve content via hooks — no AGENTS.md file on disk." />
+        <div className="mt-6 grid lg:grid-cols-2 gap-6">
+          <CodeBlock>{`# In .claude/settings.json:
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "agmd sync --stdout"
+      }]
+    }]
+  }
+}`}</CodeBlock>
+          <div className="bg-background-mantle border border-surface-1 rounded-2xl p-6 text-text-sub text-sm leading-relaxed">
+            <code className="text-text-main">--stdout</code> prints the full expanded content to stdout for hook consumption. <code className="text-text-main">--diff</code> prints only changes since last sync as a unified diff. Both update a local cache at <code className="text-text-main">.agmd/cache/last-sync.md</code> so diffs work across sessions.
           </div>
         </div>
       </section>
