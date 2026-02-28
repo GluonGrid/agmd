@@ -7,21 +7,16 @@ This project uses **agmd** to manage AI instructions. The source file is `direct
 ### Directive Syntax
 
 ```markdown
-:::use type:name         # Include a single item from ~/.agmd/type/name.md
-:::list                  # Include multiple items (mixed types)
-rule:typescript
-workflow:commit
+:::include type:name     # Include a single item from ~/.agmd/type/name.md
+:::list                  # Include multiple items
+item1
+item2
 :::end
 :::new type:name         # Define inline content (promote to registry later)
 content here...
 :::end
-:::docs                  # Expand linked docs (managed by agmd doc link/unlink)
-svelte-kit
-typescript
-:::end
-:::skills                # Expand linked skills (managed by agmd skill link/unlink)
-managing-agmd
-:::end
+:::docs                  # List symlinked documentation in ./docs/
+:::docs ./reference      # List symlinked documentation in custom path
 ```
 
 ### Commands for AI Assistants
@@ -48,8 +43,10 @@ echo "Content" | agmd edit type:name
 agmd mv rule:my-rule --to-global  # local → global
 agmd mv rule:my-rule --to-local   # global → local
 
-# Other commands
+# Sync
 agmd sync                        # Generate AGENTS.md from directives.md
+agmd sync --stdout               # Print expanded content to stdout (for hooks)
+agmd sync --diff                 # Print only changes since last sync (unified diff)
 agmd list                        # List all registry items (local + global annotated)
 agmd promote --all               # Promote all :::new blocks to registry
 
@@ -58,12 +55,6 @@ agmd migrate CLAUDE.md           # Migrate raw/unstructured file → directives.
 agmd migrate CLAUDE.md --force   # Overwrite existing directives.md
 agmd collect                     # Collect rules from agmd project into ~/.agmd/
 agmd collect -f CLAUDE.md        # Collect from a specific output file
-
-# Symlinking output to AI-specific files
-agmd symlink                     # Interactive: choose target (CLAUDE.md, .cursorrules, etc.)
-agmd symlink --target claude     # Symlink AGENTS.md → CLAUDE.md
-agmd symlink --target cursor     # Symlink AGENTS.md → .cursorrules
-agmd symlink --list              # Show available symlink targets
 
 # Task management
 agmd task list                   # List tasks for current project
@@ -92,16 +83,10 @@ agmd doc add ./docs my-docs      # Add docs folder to registry
 agmd doc link my-docs            # Symlink into project as docs/my-docs
 agmd doc unlink my-docs          # Remove symlink
 
-# Agent Skills (https://agentskills.io)
-agmd skill install owner/repo    # Install skill from GitHub
-agmd skill install owner/repo/subdir --name my-skill
-agmd skill list                  # List installed skills (local/global annotated)
-agmd skill show my-skill         # Show SKILL.md content
-agmd skill link my-skill         # Symlink into .claude/skills/ or .agents/skills/
-agmd skill link my-skill --target both  # Link into both
-agmd skill unlink my-skill       # Remove symlinks
-agmd skill update my-skill       # Re-fetch latest version
-agmd skill delete my-skill       # Remove from registry
+# Skills (multi-file capabilities for AI agents)
+agmd skill list                  # List installed skills
+agmd skill link my-skill         # Link skill into project
+agmd skill unlink my-skill       # Remove skill link
 
 # Registry git (runs git in ~/.agmd, from anywhere)
 agmd git init
@@ -116,6 +101,30 @@ agmd init --local                # Create .agmd/ in project root
 agmd new rule:my-rule --local    # Create item in local registry (overrides global)
 ```
 
+### Hook-Based Workflow (File-less)
+
+Instead of generating `AGENTS.md` on disk, serve content via Claude Code hooks:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "agmd sync --stdout"
+      }]
+    }]
+  }
+}
+```
+
+Add to `.claude/settings.json`. The agent gets fresh context at every session start and after compaction.
+
+- `--stdout`: full expanded content to stdout, updates cache
+- `--diff`: unified diff against cache, updates cache
+- Cache at `.agmd/cache/last-sync.md` (auto-gitignored)
+
 ### Migration: Existing Projects
 
 | Command | Use when | Result |
@@ -129,23 +138,11 @@ agmd migrate CLAUDE.md   # creates directives.md, opens editor
 # wrap sections with :::new ... :::end in editor, then:
 agmd promote --all       # saves :::new blocks to ~/.agmd/
 agmd sync                # generates AGENTS.md
-agmd symlink --target claude  # symlink AGENTS.md → CLAUDE.md (if needed)
 ```
 
 The built-in `managing-agmd` skill provides detailed step-by-step guidance. Link it with:
 ```bash
 agmd skill link managing-agmd
-```
-
-### Symlinking Output
-
-agmd always generates `AGENTS.md`. To use the output with tools that expect a different filename:
-
-```bash
-agmd symlink --target claude   # AGENTS.md → CLAUDE.md  (for Claude Code)
-agmd symlink --target cursor   # AGENTS.md → .cursorrules (for Cursor)
-agmd symlink --target windsurf # AGENTS.md → .windsurfrules (for Windsurf)
-agmd symlink --list            # See all available targets
 ```
 
 ### Registry Resolution Order
@@ -168,7 +165,7 @@ Some types have special subcommands:
 - `task` - Project tasks with dependencies, priority (P0-P4), type (bug/feature/task/chore)
 - `file` - Raw files without frontmatter (`agmd file ...`)
 - `doc` - Documentation folders, symlinked (`agmd doc ...`)
-- `skill` - Agent Skills from GitHub (`agmd skill ...`)
+- `skill` - Multi-file AI skills (`agmd skill ...`)
 - `profile` - Project templates (`agmd init profile:name`)
 
 ### Important
@@ -182,30 +179,6 @@ Some types have special subcommands:
 - Create `directives.local.md` for personal/machine-specific directives (gitignored, merged at sync)
 
 ## Core Agent Guardrails
-
-## Intake & Context Understanding
-
-**Before making any changes:**
-
-- **Read project configuration**
-  - Read local agent config file (AGENTS.md, CLAUDE.md, etc.)
-  - Review project documentation (README, CONTRIBUTING, architecture docs)
-  - Check for specialized docs (API.md, DEPLOYMENT.md, etc.)
-
-- **Understand structure**
-  - Identify entry points (main files, CLI commands, API routes)
-  - Map directory organization
-  - Note testing strategy and locations
-
-- **Gather context**
-  - Review recent commit history (understand evolution)
-  - Check open issues/PRs (understand current focus)
-  - Look for CI/CD configuration (understand workflows)
-
-- **Ask when unclear**
-  - Clarify ambiguous requirements before proceeding
-  - Don't assume - ask for confirmation on architectural decisions
-  - Surface trade-offs for user to decide
 
 ## Code Quality Principles
 
@@ -246,137 +219,6 @@ Some types have special subcommands:
   - Avoid dynamic types (`any`, `interface{}`, `object`) unless necessary
   - Leverage type systems to catch errors early
 
-## Dependency Management
-
-### Adding Dependencies
-
-- **Always ask before adding dependencies**
-  - Provide rationale: What problem does this solve?
-  - Explain why existing code can't solve it
-  - Provide GitHub URL (or equivalent) for review
-  - Wait for explicit approval
-
-- **Evaluate carefully**
-  - Consider maintenance burden (is it actively maintained?)
-  - Check license compatibility
-  - Assess bundle size impact (for frontend)
-  - Look for security issues
-
-- **Prefer established solutions**
-  - Well-maintained > cutting edge
-  - Community-vetted > new and shiny
-  - Standard library > third-party when possible
-
-### Package Manager Discipline
-
-- **Never swap package managers**
-  - If project uses `pnpm`, continue using `pnpm`
-  - If project uses `npm`, continue using `npm`
-  - If project uses `bun`, `cargo`, `go mod`, etc. - respect that
-  - Swapping package managers requires explicit user approval
-
-- **Respect lockfiles**
-  - Don't edit lockfiles manually
-  - Use package manager commands to update
-  - Commit lockfile changes with dependency updates
-
-- **Exact versions for patches**
-  - If a dependency is patched/vendored, use exact version
-  - No semver ranges (`^`, `~`) on patched dependencies
-  - Patching dependencies requires explicit approval
-
-## Testing Philosophy
-
-### When to Add Tests
-
-- **Always add/extend tests for bug fixes**
-  - Tests prove the fix works
-  - Tests prevent regression
-  - If you can't write a test, document why
-
-- **Add tests for new features**
-  - Test happy path
-  - Test edge cases
-  - Test error handling
-
-- **Don't obsess over coverage numbers**
-  - Aim for meaningful tests, not 100% coverage
-  - Focus on critical paths and business logic
-  - Test public APIs, not implementation details
-
-### Testing Best Practices
-
-- **Write deterministic tests**
-  - Avoid flaky tests (time-based, network-dependent)
-  - Use fixtures and mocks for external dependencies
-  - Seed random generators for reproducibility
-
-- **Keep tests fast**
-  - Unit tests should run in milliseconds
-  - Integration tests should run in seconds
-  - If tests are slow, fix them - slow tests don't get run
-
-- **Run full test suite before handoff**
-  - ALWAYS run tests before marking work complete
-  - Fix or explain any failures
-  - Don't hand off broken tests
-
-## Version Control & Git
-
-### Commit Discipline
-
-- **Only commit when explicitly asked**
-  - Never auto-commit without user request
-  - Ask for confirmation before committing
-  - Explain what you're committing and why
-
-- **Use conventional commit format**
-
-  ```
-  type(scope): summary
-
-  Optional longer description
-
-  # Never add your contribution as shown here:
-  Co-authored-by: [Agent Name] <agent@email.com>
-  ```
-
-  **Types:**
-  - `feat`: New feature
-  - `fix`: Bug fix
-  - `chore`: Maintenance (deps, config, etc.)
-  - `docs`: Documentation changes
-  - `test`: Test additions/changes
-  - `refactor`: Code restructuring (no behavior change)
-  - `perf`: Performance improvements
-  - `style`: Formatting, whitespace (no logic change)
-  - `ci`: CI/CD changes
-  - `build`: Build system changes
-
-- **One logical change per commit**
-  - Keep commits focused and atomic
-  - Don't mix unrelated changes
-  - Group related changes together
-
-### Git Safety
-
-- **Check status before destructive operations**
-  - Use wrapper scripts if provided (`scripts/committer`, `./git`, etc.)
-  - Never delete unfamiliar files without checking
-  - Don't force-push without explicit permission
-
-- **Follow documented workflows**
-  - Check for CONTRIBUTING.md or similar
-  - Follow release checklists if they exist
-  - Don't invent new git workflows
-
-- **Multi-agent awareness**
-  - **Don't create/apply/drop git stash** (unless requested)
-  - **Don't switch branches** (unless requested)
-  - **Don't modify git worktrees** (unless requested)
-  - When you see unrecognized files, note them but continue with your work
-  - Commit only YOUR changes when working in parallel
-
 ## Documentation
 
 ### When to Update Documentation
@@ -410,221 +252,6 @@ Some types have special subcommands:
   - Follow existing changelog format
   - Include issue/PR references when relevant
   - Thank contributors
-
-## Security & Secrets
-
-### Never Commit Secrets
-
-- **Use environment variables**
-  - API keys, tokens, passwords → env vars
-  - Provide `.env.example` with dummy values
-  - Document required environment variables
-
-- **Use secure storage**
-  - Keychain/credential managers for local development
-  - Secrets management services for production
-  - Never hardcode credentials
-
-- **Check before committing**
-  - Review diffs for accidental secret exposure
-  - Use `.gitignore` for sensitive files
-  - Consider git pre-commit hooks
-
-### Configuration Safety
-
-- **Ask before changing project-wide config**
-  - Changes to `.gitignore`, `tsconfig.json`, build configs, etc. need approval
-  - These affect all contributors and CI systems
-  - Explain rationale before making changes
-
-- **Don't disable security features**
-  - Don't bypass CORS, CSP, or other security measures
-  - Don't disable SSL verification
-  - Don't weaken authentication/authorization
-  - If you must, explain why and get explicit approval
-
-### Dependency Security
-
-- **Never edit `node_modules` (or equivalent)**
-  - Changes will be overwritten on next install
-  - Use patch files if you must modify dependencies
-  - Consider forking if major changes are needed
-
-- **Don't edit lockfiles manually**
-  - Use package manager commands
-  - Lockfiles ensure reproducible builds
-
-## Build & Verification
-
-### Pre-Handoff Gate
-
-Before completing work, run the full verification pipeline:
-
-1. **Format** - Code formatting passes
-2. **Lint** - Linting passes (no errors, minimal warnings)
-3. **Type-check** - No type errors (if applicable)
-4. **Test** - All tests pass
-5. **Build** - Production build succeeds
-6. **Docs** - Documentation generation succeeds (if applicable)
-
-**The order matters:** Format → Lint → Type → Test → Build
-
-### Surface Failures Clearly
-
-- **Include exact command output**
-  - Copy full error messages
-  - Include stack traces
-  - Show the command that failed
-
-- **Don't hide or minimize errors**
-  - Be explicit about what failed
-  - Explain what you tried
-  - Ask for guidance if you're stuck
-
-- **Don't stop development watchers**
-  - Keep dev servers running
-  - Don't kill background processes
-  - Let user manage their development environment
-
-## Communication & Interaction
-
-### Ask Questions
-
-- **When requirements are ambiguous**
-  - Ask for clarification
-  - Surface trade-offs
-  - Propose alternatives
-
-- **When making architectural decisions**
-  - Present options with pros/cons
-  - Explain implications
-  - Let user decide
-
-- **When blocked**
-  - Explain what you tried
-  - Describe the blocker
-  - Ask for guidance
-
-### Provide Context
-
-- **Explain changes**
-  - Why did you make this change?
-  - What problem does it solve?
-  - What trade-offs did you make?
-
-- **Surface risks**
-  - Highlight potential breaking changes
-  - Note performance implications
-  - Mention security considerations
-
-### Be Concise
-
-- **Respect user's time**
-  - Get to the point
-  - Avoid unnecessary preamble
-  - Use formatting to improve readability
-
-- **Show, don't tell**
-  - Provide code examples
-  - Show diffs
-  - Include command outputs
-
-## Language-Agnostic Workflows
-
-### Issue Investigation
-
-1. **Reproduce the issue**
-   - Understand the expected behavior
-   - Identify the actual behavior
-   - Create minimal reproduction case
-
-2. **Identify root cause**
-   - Use debugging tools
-   - Add logging/tracing
-   - Narrow down the problem
-
-3. **Fix and verify**
-   - Implement fix
-   - Add test proving fix works
-   - Verify fix doesn't break other functionality
-
-### Feature Implementation
-
-1. **Understand requirements**
-   - What problem are we solving?
-   - Who is the user?
-   - What does success look like?
-
-2. **Design approach**
-   - Identify affected files/modules
-   - Consider edge cases
-   - Plan testing strategy
-
-3. **Implement incrementally**
-   - Start with core functionality
-   - Add edge case handling
-   - Refine based on feedback
-
-4. **Verify completeness**
-   - Does it meet requirements?
-   - Are there tests?
-   - Is it documented?
-
-### Refactoring
-
-1. **Have a clear goal**
-   - What are we improving?
-   - What problem does current code have?
-   - How will we measure success?
-
-2. **Ensure safety net**
-   - Tests must pass before starting
-   - Tests should still pass after
-   - Add tests if coverage is lacking
-
-3. **Refactor incrementally**
-   - Small, focused changes
-   - Commit frequently
-   - Verify tests pass between steps
-
-4. **Clean up**
-   - Remove dead code
-   - Update documentation
-   - Verify no regressions
-
-## Advanced: Long-Running Tasks
-
-### Background Task Management
-
-**When to use:**
-
-- Commands that could hang
-- Long-running builds
-- Development servers
-- File watchers
-
-**Recommendations:**
-
-- Use tmux/screen if available (check with `which tmux`)
-- Document what you're running
-- Clean up sessions when done
-- Don't wrap in infinite polling loops
-
-**Example pattern:**
-
-```bash
-# Start in background
-tmux new-session -d -s myproject-build "npm run build"
-
-# Check status
-tmux has-session -t myproject-build 2>/dev/null && echo "Running"
-
-# Attach to view
-tmux attach -t myproject-build
-
-# Kill when done
-tmux kill-session -t myproject-build
-```
 
 ## Operational Learnings Pattern
 
@@ -722,6 +349,23 @@ where the target is relative and doesn't exist in a fresh test directory.
   to be read back as P0. Fixed by always writing priority field.
 - Cobra flag leakage between in-process test calls — fixed via resetFlags()
 - `fileExists` using os.Stat follows symlinks — fixed to use os.Lstat
+- `autoSyncRegistryFilenames` (cmd/autosync.go) used `filepath.Walk` recursively,
+  causing it to rename `skill/managing-agmd/SKILL.md` → `skill/managing-agmd.md`
+  because `relPath = "managing-agmd/SKILL" != meta.Name = "managing-agmd"`.
+  Result: `sync` destroyed SKILL.md from skill packages on every run!
+  Fixed by using os.ReadDir to process only top-level .md files (not subdirs).
+
+## Workflow Tests (tests/integration/workflow_test.go)
+Sequential multi-step tests that simulate real user flows:
+- TestWorkflow_NewProject: setup → init → new rule → sync
+- TestWorkflow_Migration: write CLAUDE.md → migrate → sync
+- TestWorkflow_DocLinkAndSync: init → doc add → doc link → sync
+- TestWorkflow_CollectAndPromote: collect → promote → verify registry
+- TestWorkflow_SkillLinkAndSync: skill link → sync → verify AGENTS.md
+
+### Key note: setup() does not save registry path
+`setup(t)` sets AGMD_HOME but doesn't return it in workflow tests.
+If you need to check registry contents, save the return value: `registry := setup(t)`
 
 ## Skills available
 
@@ -729,7 +373,7 @@ where the target is relative and doesn't exist in a fresh test directory.
   <skill>
     <name>managing-agmd</name>
     <description>Manages agmd projects: initializing registries, migrating existing AI instruction files (CLAUDE.md, AGENTS.md, .cursorrules) to directives.md format, managing reusable rules/workflows/guides, syncing output, and tracking project tasks. Use when the user mentions agmd, directives.md, wants to migrate AI instructions, organize agent rules, or manage project tasks with agmd.</description>
-    <location>/Users/sky/git/agent-md/.claude/skills/managing-agmd/SKILL.md</location>
+    <location>~/git/agent-md/.claude/skills/managing-agmd/SKILL.md</location>
   </skill>
 </available_skills>
 
