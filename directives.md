@@ -4,29 +4,15 @@
 
 ## Core Agent Guardrails
 
-:::use guardrail:intake-context
+:::list
 
-:::use guardrail:code-quality
+    guardrail:code-quality
 
-:::use guardrail:dependencies
+    guardrail:documentation
 
-:::use guardrail:testing
+    pattern:operational-learnings
 
-:::use guardrail:git-workflow
-
-:::use guardrail:documentation
-
-:::use guardrail:security
-
-:::use guardrail:build-verification
-
-:::use guardrail:communication
-
-:::use workflow:development
-
-:::use guide:long-running-tasks
-
-:::use pattern:operational-learnings
+:::end
 
 ## Development
 
@@ -35,5 +21,7 @@
 ## Skills available
 
 :::skills
-managing-agmd
+
+    managing-agmd
+
 :::end
