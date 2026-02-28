@@ -7,16 +7,19 @@ This project uses **agmd** to manage AI instructions. The source file is `direct
 ### Directive Syntax
 
 ```markdown
-:::include type:name     # Include a single item from ~/.agmd/type/name.md
+:::use type:name         # Include a single item from ~/.agmd/type/name.md
 :::list                  # Include multiple items
-item1
-item2
+rule:typescript
+workflow:commit
 :::end
 :::new type:name         # Define inline content (promote to registry later)
 content here...
 :::end
 :::docs                  # List symlinked documentation in ./docs/
 :::docs ./reference      # List symlinked documentation in custom path
+:::skills                # List linked skills
+managing-agmd
+:::end
 ```
 
 ### Commands for AI Assistants
@@ -49,6 +52,15 @@ agmd sync --stdout               # Print expanded content to stdout (for hooks)
 agmd sync --diff                 # Print only changes since last sync (unified diff)
 agmd list                        # List all registry items (local + global annotated)
 agmd promote --all               # Promote all :::new blocks to registry
+
+# Symlink AGENTS.md for other AI tools
+agmd symlink add --claude        # Create CLAUDE.md → AGENTS.md
+agmd symlink add --cursor        # Create .cursorrules → AGENTS.md
+agmd symlink add --windsurf      # Create .windsurfrules → AGENTS.md
+agmd symlink add --copilot       # Create .github/copilot-instructions.md → AGENTS.md
+agmd symlink add --all           # Create all symlinks
+agmd symlink list                # Show symlink status
+agmd symlink remove CLAUDE.md    # Remove a symlink
 
 # Migrating existing projects
 agmd migrate CLAUDE.md           # Migrate raw/unstructured file → directives.md
@@ -101,9 +113,22 @@ agmd init --local                # Create .agmd/ in project root
 agmd new rule:my-rule --local    # Create item in local registry (overrides global)
 ```
 
-### Hook-Based Workflow (File-less)
+### Symlinking Output
 
-Instead of generating `AGENTS.md` on disk, serve content via Claude Code hooks:
+agmd always generates `AGENTS.md`. To use the output with tools that expect a different filename:
+
+```bash
+agmd symlink add --claude    # AGENTS.md → CLAUDE.md
+agmd symlink add --cursor    # AGENTS.md → .cursorrules
+agmd symlink add --windsurf  # AGENTS.md → .windsurfrules
+agmd symlink add --copilot   # AGENTS.md → .github/copilot-instructions.md
+agmd symlink add --all       # All of the above
+agmd symlink list            # See status of all symlinks
+```
+
+### Hook-Based Workflow (Optional, File-less)
+
+As an alternative to `AGENTS.md` on disk, serve content via Claude Code hooks:
 
 ```json
 {
@@ -114,13 +139,20 @@ Instead of generating `AGENTS.md` on disk, serve content via Claude Code hooks:
         "type": "command",
         "command": "agmd sync --stdout"
       }]
+    }],
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{
+        "type": "command",
+        "command": "~/.agmd/hooks/post-tool-use-learning.sh"
+      }]
     }]
   }
 }
 ```
 
-Add to `.claude/settings.json`. The agent gets fresh context at every session start and after compaction.
-
+- **SessionStart**: injects full content at session start and after compaction
+- **PostToolUse**: detects edits to learning files and injects the diff via `additionalContext`
 - `--stdout`: full expanded content to stdout, updates cache
 - `--diff`: unified diff against cache, updates cache
 - Cache at `.agmd/cache/last-sync.md` (auto-gitignored)
@@ -138,6 +170,7 @@ agmd migrate CLAUDE.md   # creates directives.md, opens editor
 # wrap sections with :::new ... :::end in editor, then:
 agmd promote --all       # saves :::new blocks to ~/.agmd/
 agmd sync                # generates AGENTS.md
+agmd symlink add --claude  # symlink AGENTS.md → CLAUDE.md (if needed)
 ```
 
 The built-in `managing-agmd` skill provides detailed step-by-step guidance. Link it with:
