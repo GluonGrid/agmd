@@ -1,9 +1,22 @@
 package integration
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
+}
 
 func TestTask_List(t *testing.T) {
 	setup(t)
@@ -193,5 +206,105 @@ func TestTask_ShowAll(t *testing.T) {
 	}
 	if !strings.Contains(out, "Content B.") {
 		t.Error("show --all should include Content B.")
+	}
+}
+
+func TestTask_WorktreeUsesCanonicalProject(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	registry := setup(t)
+	_ = registry
+
+	baseDir := t.TempDir()
+	mainRepo := filepath.Join(baseDir, "canonical-project")
+	worktreeRepo := filepath.Join(baseDir, "feature-worktree")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir main repo: %v", err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer os.Chdir(orig)
+
+	if err := os.Chdir(mainRepo); err != nil {
+		t.Fatalf("chdir main repo: %v", err)
+	}
+	runGit(t, mainRepo, "init")
+	runGit(t, mainRepo, "config", "user.email", "test@example.com")
+	runGit(t, mainRepo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(mainRepo, "README.md"), []byte("seed"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit(t, mainRepo, "add", "README.md")
+	runGit(t, mainRepo, "commit", "-m", "init")
+	runGit(t, mainRepo, "worktree", "add", "-b", "feature-x", worktreeRepo)
+
+	if err := os.Chdir(worktreeRepo); err != nil {
+		t.Fatalf("chdir worktree: %v", err)
+	}
+	run(t, "task", "new", "worktree-task", "--content", "from worktree")
+
+	if err := os.Chdir(mainRepo); err != nil {
+		t.Fatalf("chdir main repo: %v", err)
+	}
+	out := run(t, "task", "list")
+	if !strings.Contains(out, "worktree-task") {
+		t.Fatalf("task created in worktree should be visible in canonical project, got:\n%s", out)
+	}
+
+	out = run(t, "task", "list", "--project", "feature-worktree")
+	if strings.Contains(out, "worktree-task") {
+		t.Fatalf("task should not be stored under worktree folder name, got:\n%s", out)
+	}
+}
+
+func TestTask_RepoPathExplicitTargeting(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	setup(t)
+
+	baseDir := t.TempDir()
+	repoPath := filepath.Join(baseDir, "project-alpha")
+	otherDir := filepath.Join(baseDir, "elsewhere")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("mkdir other: %v", err)
+	}
+
+	runGit(t, repoPath, "init")
+	runGit(t, repoPath, "config", "user.email", "test@example.com")
+	runGit(t, repoPath, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("seed"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit(t, repoPath, "add", "README.md")
+	runGit(t, repoPath, "commit", "-m", "init")
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer os.Chdir(orig)
+	if err := os.Chdir(otherDir); err != nil {
+		t.Fatalf("chdir other: %v", err)
+	}
+
+	run(t, "task", "new", "repo-task", "--repo-path", repoPath, "--content", "explicit repo target")
+	out := run(t, "task", "list", "--repo-path", repoPath)
+	if !strings.Contains(out, "repo-task") {
+		t.Fatalf("repo-targeted task should be listed via --repo-path, got:\n%s", out)
+	}
+
+	out = run(t, "task", "list")
+	if strings.Contains(out, "repo-task") {
+		t.Fatalf("task should not appear for unrelated cwd project, got:\n%s", out)
 	}
 }

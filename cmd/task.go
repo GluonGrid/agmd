@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,8 +21,8 @@ type Task struct {
 	Name        string   `yaml:"-"`
 	Subject     string   `yaml:"subject"`
 	Status      string   `yaml:"status"`
-	Priority    int      `yaml:"priority,omitempty"`  // 0-4 (P0=critical, P4=backlog)
-	Type        string   `yaml:"type,omitempty"`      // bug, feature, task, chore
+	Priority    int      `yaml:"priority,omitempty"` // 0-4 (P0=critical, P4=backlog)
+	Type        string   `yaml:"type,omitempty"`     // bug, feature, task, chore
 	Feature     string   `yaml:"feature,omitempty"`
 	DependsOn   []string `yaml:"depends_on"`
 	Content     string   `yaml:"-"`
@@ -49,6 +50,7 @@ const (
 
 // Shared flags for task subcommands
 var taskProject string
+var taskRepoPath string
 var taskFeature string
 var taskAll bool
 var taskForce bool
@@ -68,7 +70,8 @@ var taskCmd = &cobra.Command{
 	Short: "Manage project tasks",
 	Long: `Manage project tasks with dependencies, priorities, and status tracking.
 
-Tasks are organized by project (based on current directory name).
+Tasks are organized by project (derived from repository identity).
+In Git worktrees, agmd resolves to the canonical repository project.
 Each task has a priority (P0-P4) and type (bug/feature/task/chore).
 Tasks are auto-sorted by priority then status.
 
@@ -272,8 +275,9 @@ func init() {
 	taskCmd.AddCommand(taskUnblockCmd)
 	taskCmd.AddCommand(taskEditCmd)
 
-	// Add --project and --feature flags to subcommands that need them
-	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	// Add --project/--repo-path and --feature flags to subcommands that need them
+	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskListCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskListCmd.Flags().StringVar(&taskFeature, "feature", "", "Filter tasks by feature")
 	taskListCmd.Flags().BoolVarP(&taskAll, "all", "a", false, "Include completed tasks")
 	taskListCmd.Flags().StringVar(&taskStatus, "status", "", "Filter by computed status (ready, blocked, in_progress, completed)")
@@ -284,7 +288,8 @@ func init() {
 	taskListCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskListCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
-	taskNewCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskNewCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskNewCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskNewCmd.Flags().StringVar(&taskFeature, "feature", "", "Feature/session name for this task")
 	taskNewCmd.Flags().StringVar(&taskContent, "content", "", "Task content/description")
 	taskNewCmd.Flags().StringVar(&taskBlockedBy, "blocked-by", "", "Comma-separated list of task dependencies")
@@ -294,38 +299,99 @@ func init() {
 	taskNewCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskNewCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
-	taskShowCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskShowCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskShowCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskShowCmd.Flags().StringVar(&taskFeature, "feature", "", "Filter tasks by feature")
 	taskShowCmd.Flags().BoolVarP(&taskAll, "all", "a", false, "Show all tasks for project")
 	taskShowCmd.Flags().BoolVar(&taskRaw, "raw", false, "Include frontmatter in output")
 
-	taskDeleteCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskDeleteCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskDeleteCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskDeleteCmd.Flags().BoolVarP(&taskForce, "force", "f", false, "Skip confirmation prompt")
 
-	taskStatusCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
-	taskBlockedByCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
-	taskUnblockCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskStatusCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskStatusCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
+	taskBlockedByCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskBlockedByCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
+	taskUnblockCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskUnblockCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 
-	taskEditCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskEditCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskEditCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskEditCmd.Flags().IntVarP(&taskEditPriority, "priority", "p", -1, "New priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
 	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
 	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
-	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskCleanCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskCleanCmd.Flags().BoolVarP(&taskForce, "force", "f", false, "Skip confirmation prompt")
 }
 
-// getProjectName returns the project name (from flag or cwd)
+// getProjectName returns the project name from explicit selector or repository path.
 func getProjectName() (string, error) {
 	if taskProject != "" {
 		return taskProject, nil
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current directory: %w", err)
+
+	targetPath := taskRepoPath
+	if targetPath == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+		targetPath = cwd
 	}
-	return filepath.Base(cwd), nil
+
+	canonicalRepoPath, err := resolveCanonicalRepoPath(targetPath)
+	if err != nil {
+		absPath, absErr := filepath.Abs(targetPath)
+		if absErr != nil {
+			return "", fmt.Errorf("failed to resolve project path '%s': %w", targetPath, absErr)
+		}
+		return filepath.Base(absPath), nil
+	}
+	return filepath.Base(canonicalRepoPath), nil
+}
+
+// resolveCanonicalRepoPath resolves path to canonical repo root.
+// In worktrees, this maps to the main repo path from git common dir.
+func resolveCanonicalRepoPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	commonDir, err := gitRevParse(absPath, "--path-format=absolute", "--git-common-dir")
+	if err == nil && commonDir != "" {
+		normalized := filepath.Clean(commonDir)
+		if filepath.Base(normalized) == ".git" {
+			return filepath.Dir(normalized), nil
+		}
+	}
+
+	topLevel, topErr := gitRevParse(absPath, "--path-format=absolute", "--show-toplevel")
+	if topErr == nil && topLevel != "" {
+		return filepath.Clean(topLevel), nil
+	}
+
+	if err != nil {
+		return "", err
+	}
+	return "", topErr
+}
+
+func gitRevParse(path string, args ...string) (string, error) {
+	gitArgs := append([]string{"-C", path, "rev-parse"}, args...)
+	out, err := exec.Command("git", gitArgs...).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("git rev-parse failed for '%s': %s", path, msg)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // getTaskPath returns the path to a task file
