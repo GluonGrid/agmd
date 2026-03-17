@@ -1,12 +1,19 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+type codedError interface {
+	error
+	ErrorCode() string
+	ExitStatus() int
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "agmd",
@@ -66,6 +73,25 @@ Sync across devices:
 // Execute runs the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		if coded, ok := err.(codedError); ok {
+			if taskJSON {
+				payload := map[string]interface{}{
+					"error": map[string]string{
+						"code":    coded.ErrorCode(),
+						"message": coded.Error(),
+					},
+				}
+				encoded, marshalErr := json.Marshal(payload)
+				if marshalErr == nil {
+					fmt.Fprintln(os.Stderr, string(encoded))
+				} else {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			} else {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			os.Exit(coded.ExitStatus())
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

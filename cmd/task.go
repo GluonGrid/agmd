@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +22,7 @@ import (
 // Task represents a task with its metadata
 type Task struct {
 	Name        string   `yaml:"-"`
+	ID          string   `yaml:"id,omitempty"`
 	Subject     string   `yaml:"subject"`
 	Status      string   `yaml:"status"`
 	Priority    int      `yaml:"priority,omitempty"` // 0-4 (P0=critical, P4=backlog)
@@ -51,6 +55,7 @@ const (
 // Shared flags for task subcommands
 var taskProject string
 var taskRepoPath string
+var taskJSON bool
 var taskFeature string
 var taskAll bool
 var taskForce bool
@@ -64,6 +69,51 @@ var taskPriority int
 var taskType string
 var taskFilterPriority string
 var taskFilterType string
+
+type codedTaskError struct {
+	Code     string
+	Message  string
+	ExitCode int
+}
+
+func (e *codedTaskError) Error() string {
+	return e.Message
+}
+
+func (e *codedTaskError) ErrorCode() string {
+	return e.Code
+}
+
+func (e *codedTaskError) ExitStatus() int {
+	if e.ExitCode <= 0 {
+		return 1
+	}
+	return e.ExitCode
+}
+
+func newTaskError(code, format string, args ...interface{}) error {
+	exitCode := 1
+	switch code {
+	case "invalid_input":
+		exitCode = 2
+	case "not_found":
+		exitCode = 3
+	case "project_mismatch":
+		exitCode = 4
+	case "invalid_transition":
+		exitCode = 5
+	}
+	return &codedTaskError{
+		Code:     code,
+		Message:  fmt.Sprintf(format, args...),
+		ExitCode: exitCode,
+	}
+}
+
+func printJSON(payload interface{}) error {
+	encoder := json.NewEncoder(os.Stdout)
+	return encoder.Encode(payload)
+}
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -274,6 +324,7 @@ func init() {
 	taskCmd.AddCommand(taskBlockedByCmd)
 	taskCmd.AddCommand(taskUnblockCmd)
 	taskCmd.AddCommand(taskEditCmd)
+	taskCmd.PersistentFlags().BoolVar(&taskJSON, "json", false, "Output machine-readable JSON")
 
 	// Add --project/--repo-path and --feature flags to subcommands that need them
 	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
@@ -394,6 +445,114 @@ func gitRevParse(path string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func computeTaskID(projectName, taskName string) string {
+	sum := sha256.Sum256([]byte(projectName + "::" + taskName))
+	return "tsk_" + hex.EncodeToString(sum[:8])
+}
+
+func ensureTaskIdentity(task *Task, projectName string) {
+	task.ProjectName = projectName
+	if task.ID == "" {
+		task.ID = computeTaskID(projectName, task.Name)
+	}
+}
+
+type taskJSONItem struct {
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Project             string   `json:"project"`
+	Subject             string   `json:"subject"`
+	Status              string   `json:"status"`
+	ComputedStatus      string   `json:"computed_status"`
+	Priority            int      `json:"priority"`
+	Type                string   `json:"type"`
+	Feature             string   `json:"feature,omitempty"`
+	DependsOn           []string `json:"depends_on"`
+	PendingDependencies []string `json:"pending_dependencies,omitempty"`
+	Content             string   `json:"content,omitempty"`
+}
+
+type taskListJSONPayload struct {
+	Project string         `json:"project"`
+	Feature string         `json:"feature,omitempty"`
+	Tasks   []taskJSONItem `json:"tasks"`
+	Counts  struct {
+		Total      int `json:"total"`
+		Ready      int `json:"ready"`
+		Blocked    int `json:"blocked"`
+		InProgress int `json:"in_progress"`
+		Completed  int `json:"completed"`
+	} `json:"counts"`
+}
+
+type taskMutationJSONPayload struct {
+	OK      bool   `json:"ok"`
+	Action  string `json:"action"`
+	Project string `json:"project"`
+	Task    string `json:"task,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Status  string `json:"status,omitempty"`
+}
+
+func taskToJSONItem(task *Task, taskMap map[string]*Task, includeContent bool) taskJSONItem {
+	taskType := task.Type
+	if taskType == "" {
+		taskType = "task"
+	}
+	status := computeTaskStatus(task, taskMap)
+	item := taskJSONItem{
+		ID:             task.ID,
+		Name:           task.Name,
+		Project:        task.ProjectName,
+		Subject:        task.Subject,
+		Status:         task.Status,
+		ComputedStatus: string(status),
+		Priority:       task.Priority,
+		Type:           taskType,
+		Feature:        task.Feature,
+		DependsOn:      task.DependsOn,
+	}
+	if status == StatusBlocked {
+		item.PendingDependencies = getPendingDependencies(task, taskMap)
+	}
+	if includeContent {
+		item.Content = task.Content
+	}
+	return item
+}
+
+func buildTaskListJSON(projectName, feature string, tasks []*Task, taskMap map[string]*Task, includeContent bool) taskListJSONPayload {
+	payload := taskListJSONPayload{
+		Project: projectName,
+		Feature: feature,
+		Tasks:   make([]taskJSONItem, 0, len(tasks)),
+	}
+	for _, task := range tasks {
+		status := computeTaskStatus(task, taskMap)
+		switch status {
+		case StatusReady:
+			payload.Counts.Ready++
+		case StatusBlocked:
+			payload.Counts.Blocked++
+		case StatusInProgress:
+			payload.Counts.InProgress++
+		case StatusCompleted:
+			payload.Counts.Completed++
+		}
+		payload.Tasks = append(payload.Tasks, taskToJSONItem(task, taskMap, includeContent))
+	}
+	payload.Counts.Total = len(tasks)
+	return payload
+}
+
+func parseTaskRef(name string) (string, string, bool) {
+	if !strings.Contains(name, "/") {
+		return "", name, false
+	}
+	parts := strings.SplitN(name, "/", 2)
+	return parts[0], parts[1], true
+}
+
 // getTaskPath returns the path to a task file
 func getTaskPath(reg *registry.Registry, projectName, taskName string) string {
 	return filepath.Join(reg.BasePath, "task", projectName, taskName+".md")
@@ -437,6 +596,7 @@ func loadTask(filePath string) (*Task, error) {
 	}
 
 	task.Content = strings.TrimSpace(string(body))
+	ensureTaskIdentity(task, filepath.Base(filepath.Dir(filePath)))
 	return task, nil
 }
 
@@ -466,6 +626,7 @@ func extractTaskFrontmatter(content []byte) ([]byte, []byte, error) {
 func saveTask(task *Task) error {
 	// Build frontmatter
 	frontmatter := struct {
+		ID        string   `yaml:"id,omitempty"`
 		Subject   string   `yaml:"subject"`
 		Status    string   `yaml:"status"`
 		Priority  int      `yaml:"priority,omitempty"`
@@ -473,6 +634,7 @@ func saveTask(task *Task) error {
 		Feature   string   `yaml:"feature,omitempty"`
 		DependsOn []string `yaml:"depends_on"`
 	}{
+		ID:        task.ID,
 		Subject:   task.Subject,
 		Status:    task.Status,
 		Priority:  task.Priority,
@@ -513,7 +675,7 @@ func loadProjectTasks(reg *registry.Registry, projectName string) ([]*Task, erro
 		if err != nil {
 			continue
 		}
-		task.ProjectName = projectName
+		ensureTaskIdentity(task, projectName)
 		tasks = append(tasks, task)
 	}
 
@@ -1054,6 +1216,10 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(tasks) == 0 {
+		if taskJSON {
+			emptyTaskMap := map[string]*Task{}
+			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, false))
+		}
 		if taskFeature != "" {
 			fmt.Printf("%s No tasks for project '%s' with feature '%s'\n", yellow("!"), projectName, taskFeature)
 		} else {
@@ -1133,6 +1299,23 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 
 	// Sort by priority then status
 	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
+	if taskJSON && taskTree {
+		return newTaskError("invalid_input", "cannot use --tree with --json")
+	}
+
+	visible := sorted
+	if !taskAll {
+		filtered := make([]*Task, 0, len(sorted))
+		for _, task := range sorted {
+			if computeTaskStatus(task, taskMap) != StatusCompleted {
+				filtered = append(filtered, task)
+			}
+		}
+		visible = filtered
+	}
+	if taskJSON {
+		return printJSON(buildTaskListJSON(projectName, taskFeature, visible, taskMap, false))
+	}
 
 	// Count by status
 	completedCount := 0
@@ -1246,12 +1429,12 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 
 	// Validate priority
 	if taskPriority < 0 || taskPriority > 4 {
-		return fmt.Errorf("invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskPriority)
+		return newTaskError("invalid_input", "invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskPriority)
 	}
 
 	// Validate type
 	if !validTaskTypes[taskType] {
-		return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskType)
+		return newTaskError("invalid_input", "invalid type '%s'. Use: bug, feature, task, or chore", taskType)
 	}
 
 	// Build path: ~/.agmd/task/<project>/<name>.md
@@ -1260,7 +1443,7 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 
 	// Check if exists
 	if _, err := os.Stat(filePath); err == nil {
-		return fmt.Errorf("task:%s already exists in project '%s'", name, projectName)
+		return newTaskError("invalid_input", "task:%s already exists in project '%s'", name, projectName)
 	}
 
 	// Create directory
@@ -1295,7 +1478,7 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		for _, dep := range dependsOn {
 			depPath := getTaskPath(reg, projectName, dep)
 			if _, err := os.Stat(depPath); os.IsNotExist(err) {
-				return fmt.Errorf("dependency task '%s' not found in project '%s'", dep, projectName)
+				return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dep, projectName)
 			}
 		}
 	}
@@ -1321,14 +1504,26 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		optionalLines += fmt.Sprintf("type: %s\n", taskType)
 	}
 
-	fileContent := fmt.Sprintf("---\nsubject: %s\nstatus: pending\n%sdepends_on: %s\n---\n\n%s",
-		subject, optionalLines, dependsOnYAML, strings.TrimSpace(content))
+	taskID := computeTaskID(projectName, name)
+	fileContent := fmt.Sprintf("---\nid: %s\nsubject: %s\nstatus: pending\n%sdepends_on: %s\n---\n\n%s",
+		taskID, subject, optionalLines, dependsOnYAML, strings.TrimSpace(content))
 
 	if err := os.WriteFile(filePath, []byte(fileContent+"\n"), 0644); err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
 
 	// Build info message
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "new",
+			Project: projectName,
+			Task:    name,
+			ID:      taskID,
+			Status:  "pending",
+		})
+	}
+
 	infoMsg := fmt.Sprintf("%s Created task:%s (project: %s", green("ok"), name, projectName)
 	if taskPriority != 2 {
 		infoMsg += fmt.Sprintf(", P%d", taskPriority)
@@ -1367,31 +1562,37 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) == 0 {
-		return fmt.Errorf("specify a task name or use --all")
+		return newTaskError("invalid_input", "specify a task name or use --all")
 	}
 
 	name := args[0]
 
 	// Check if name includes project (project/task-name)
-	projectName := taskProject
-	taskName := name
-	if strings.Contains(name, "/") {
-		parts := strings.SplitN(name, "/", 2)
-		projectName = parts[0]
-		taskName = parts[1]
+	projectNameFromName, taskName, hasProjectInName := parseTaskRef(name)
+	if hasProjectInName && taskProject != "" && projectNameFromName != taskProject {
+		return newTaskError(
+			"project_mismatch",
+			"task reference '%s' does not match --project '%s'",
+			projectNameFromName,
+			taskProject,
+		)
 	}
 
+	projectName := taskProject
+	if hasProjectInName {
+		projectName = projectNameFromName
+	}
 	if projectName == "" {
-		pn, err := getProjectName()
+		resolved, err := getProjectName()
 		if err != nil {
 			return err
 		}
-		projectName = pn
+		projectName = resolved
 	}
 
 	taskPath := getTaskPath(reg, projectName, taskName)
 	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
 	}
 
 	if taskRaw {
@@ -1406,6 +1607,14 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	task, err := loadTask(taskPath)
 	if err != nil {
 		return fmt.Errorf("failed to load task: %w", err)
+	}
+	ensureTaskIdentity(task, projectName)
+	taskMap := map[string]*Task{
+		task.Name: task,
+	}
+
+	if taskJSON {
+		return printJSON(taskToJSONItem(task, taskMap, true))
 	}
 
 	fmt.Printf("%s %s\n", dim("subject:"), task.Subject)
@@ -1450,10 +1659,14 @@ func runTaskShowAll(reg *registry.Registry) error {
 	}
 
 	if len(tasks) == 0 {
-		if taskFeature != "" {
-			return fmt.Errorf("no tasks found for project '%s' with feature '%s'", projectName, taskFeature)
+		if taskJSON {
+			emptyTaskMap := map[string]*Task{}
+			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, true))
 		}
-		return fmt.Errorf("no tasks found for project '%s'", projectName)
+		if taskFeature != "" {
+			return newTaskError("not_found", "no tasks found for project '%s' with feature '%s'", projectName, taskFeature)
+		}
+		return newTaskError("not_found", "no tasks found for project '%s'", projectName)
 	}
 
 	// Build task map and sort
@@ -1462,6 +1675,9 @@ func runTaskShowAll(reg *registry.Registry) error {
 		taskMap[t.Name] = t
 	}
 	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
+	if taskJSON {
+		return printJSON(buildTaskListJSON(projectName, taskFeature, sorted, taskMap, true))
+	}
 
 	fmt.Printf("Tasks for: %s\n\n", cyan(projectName))
 
@@ -1526,18 +1742,30 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(completedTasks) == 0 {
+		if taskJSON {
+			return printJSON(taskMutationJSONPayload{
+				OK:      true,
+				Action:  "clean",
+				Project: projectName,
+			})
+		}
 		fmt.Printf("%s No completed tasks to clean in project '%s'\n", yellow("!"), projectName)
 		return nil
 	}
 
 	// Show what will be deleted
-	fmt.Printf("Found %d completed task(s) to delete:\n", len(completedTasks))
-	for _, t := range completedTasks {
-		fmt.Printf("  - %s\n", t.Name)
+	if !taskJSON {
+		fmt.Printf("Found %d completed task(s) to delete:\n", len(completedTasks))
+		for _, t := range completedTasks {
+			fmt.Printf("  - %s\n", t.Name)
+		}
 	}
 
 	// Confirmation prompt (unless --force)
 	if !taskForce {
+		if taskJSON {
+			return newTaskError("invalid_input", "task clean requires --force when --json is enabled")
+		}
 		fmt.Printf("\n%s This will permanently delete these tasks.\n", yellow("⚠"))
 		fmt.Print("\nAre you sure? (y/N): ")
 
@@ -1561,14 +1789,28 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("%s Deleted %d completed task(s)\n", green("✓"), deleted)
-
 	// Clean up empty project directory
 	taskDir := getTaskDir(reg, projectName)
 	entries, err := os.ReadDir(taskDir)
 	if err == nil && len(entries) == 0 {
 		os.Remove(taskDir)
 	}
+
+	if taskJSON {
+		return printJSON(struct {
+			OK      bool   `json:"ok"`
+			Action  string `json:"action"`
+			Project string `json:"project"`
+			Deleted int    `json:"deleted"`
+		}{
+			OK:      true,
+			Action:  "clean",
+			Project: projectName,
+			Deleted: deleted,
+		})
+	}
+
+	fmt.Printf("%s Deleted %d completed task(s)\n", green("✓"), deleted)
 
 	return nil
 }
@@ -1580,17 +1822,17 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 
 	// Check if at least one flag is provided
 	if taskEditPriority == -1 && taskEditType == "" {
-		return fmt.Errorf("specify at least one of --priority or --type")
+		return newTaskError("invalid_input", "specify at least one of --priority or --type")
 	}
 
 	// Validate priority if provided
 	if taskEditPriority != -1 && (taskEditPriority < 0 || taskEditPriority > 4) {
-		return fmt.Errorf("invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskEditPriority)
+		return newTaskError("invalid_input", "invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskEditPriority)
 	}
 
 	// Validate type if provided
 	if taskEditType != "" && !validTaskTypes[taskEditType] {
-		return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskEditType)
+		return newTaskError("invalid_input", "invalid type '%s'. Use: bug, feature, task, or chore", taskEditType)
 	}
 
 	reg, err := registry.New()
@@ -1609,13 +1851,14 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 
 	taskPath := getTaskPath(reg, projectName, taskName)
 	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
 	}
 
 	task, err := loadTask(taskPath)
 	if err != nil {
 		return fmt.Errorf("failed to load task: %w", err)
 	}
+	ensureTaskIdentity(task, projectName)
 
 	// Track changes for output message
 	var changes []string
@@ -1639,6 +1882,17 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "edit",
+			Project: projectName,
+			Task:    taskName,
+			ID:      task.ID,
+			Status:  task.Status,
+		})
 	}
 
 	fmt.Printf("%s Updated task '%s': %s\n", green("✓"), taskName, strings.Join(changes, ", "))
@@ -1668,15 +1922,22 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 
 	taskPath := getTaskPath(reg, projectName, name)
 	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", name, projectName)
+		return newTaskError("not_found", "task '%s' not found in project '%s'", name, projectName)
 	}
 
+	taskID := computeTaskID(projectName, name)
+
 	// Show what will be deleted
-	fmt.Printf("%s Deleting task:%s (project: %s)\n", blue("→"), name, projectName)
-	fmt.Printf("  Path: %s\n", taskPath)
+	if !taskJSON {
+		fmt.Printf("%s Deleting task:%s (project: %s)\n", blue("→"), name, projectName)
+		fmt.Printf("  Path: %s\n", taskPath)
+	}
 
 	// Confirmation prompt (unless --force)
 	if !taskForce {
+		if taskJSON {
+			return newTaskError("invalid_input", "task delete requires --force when --json is enabled")
+		}
 		fmt.Printf("\n%s This will permanently delete this task.\n", yellow("⚠"))
 		fmt.Print("\nAre you sure? (y/N): ")
 
@@ -1695,8 +1956,6 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to delete task: %w", err)
 	}
 
-	fmt.Printf("%s Deleted task:%s\n", green("✓"), name)
-
 	// Clean up empty project directory
 	taskDir := getTaskDir(reg, projectName)
 	entries, err := os.ReadDir(taskDir)
@@ -1704,6 +1963,17 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 		os.Remove(taskDir)
 	}
 
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "delete",
+			Project: projectName,
+			Task:    name,
+			ID:      taskID,
+		})
+	}
+
+	fmt.Printf("%s Deleted task:%s\n", green("✓"), name)
 	return nil
 }
 
@@ -1720,7 +1990,7 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 		"completed":   true,
 	}
 	if !validStatuses[newStatus] {
-		return fmt.Errorf("invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
+		return newTaskError("invalid_input", "invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
 	}
 
 	reg, err := registry.New()
@@ -1735,17 +2005,38 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 
 	taskPath := getTaskPath(reg, projectName, taskName)
 	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
 	}
 
 	task, err := loadTask(taskPath)
 	if err != nil {
 		return fmt.Errorf("failed to load task: %w", err)
 	}
+	ensureTaskIdentity(task, projectName)
+
+	if task.Status == "completed" && newStatus != "completed" {
+		return newTaskError(
+			"invalid_transition",
+			"invalid status transition for task '%s': completed -> %s",
+			taskName,
+			newStatus,
+		)
+	}
 
 	task.Status = newStatus
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "status",
+			Project: projectName,
+			Task:    taskName,
+			ID:      task.ID,
+			Status:  newStatus,
+		})
 	}
 
 	fmt.Printf("%s Updated task '%s' status to '%s'\n", green("✓"), taskName, newStatus)
@@ -1770,30 +2061,42 @@ func runTaskBlockedBy(cmd *cobra.Command, args []string) error {
 
 	taskPath := getTaskPath(reg, projectName, taskName)
 	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
 	}
 
 	// Check dependency exists
 	depPath := getTaskPath(reg, projectName, dependency)
 	if _, err := os.Stat(depPath); os.IsNotExist(err) {
-		return fmt.Errorf("dependency task '%s' not found in project '%s'", dependency, projectName)
+		return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dependency, projectName)
 	}
 
 	task, err := loadTask(taskPath)
 	if err != nil {
 		return fmt.Errorf("failed to load task: %w", err)
 	}
+	ensureTaskIdentity(task, projectName)
 
 	// Check if already depends on it
 	for _, dep := range task.DependsOn {
 		if dep == dependency {
-			return fmt.Errorf("task '%s' already depends on '%s'", taskName, dependency)
+			return newTaskError("invalid_input", "task '%s' already depends on '%s'", taskName, dependency)
 		}
 	}
 
 	task.DependsOn = append(task.DependsOn, dependency)
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "blocked-by",
+			Project: projectName,
+			Task:    taskName,
+			ID:      task.ID,
+			Status:  task.Status,
+		})
 	}
 
 	fmt.Printf("%s Added dependency: '%s' is now blocked by '%s'\n", green("✓"), taskName, dependency)
@@ -1818,13 +2121,14 @@ func runTaskUnblock(cmd *cobra.Command, args []string) error {
 
 	taskPath := getTaskPath(reg, projectName, taskName)
 	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
 	}
 
 	task, err := loadTask(taskPath)
 	if err != nil {
 		return fmt.Errorf("failed to load task: %w", err)
 	}
+	ensureTaskIdentity(task, projectName)
 
 	// Remove dependency
 	found := false
@@ -1838,12 +2142,23 @@ func runTaskUnblock(cmd *cobra.Command, args []string) error {
 	}
 
 	if !found {
-		return fmt.Errorf("task '%s' does not depend on '%s'", taskName, dependency)
+		return newTaskError("not_found", "task '%s' does not depend on '%s'", taskName, dependency)
 	}
 
 	task.DependsOn = newDeps
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "unblock",
+			Project: projectName,
+			Task:    taskName,
+			ID:      task.ID,
+			Status:  task.Status,
+		})
 	}
 
 	fmt.Printf("%s Removed dependency: '%s' is no longer blocked by '%s'\n", green("✓"), taskName, dependency)

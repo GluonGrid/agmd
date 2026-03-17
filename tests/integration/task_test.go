@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -306,5 +307,125 @@ func TestTask_RepoPathExplicitTargeting(t *testing.T) {
 	out = run(t, "task", "list")
 	if strings.Contains(out, "repo-task") {
 		t.Fatalf("task should not appear for unrelated cwd project, got:\n%s", out)
+	}
+}
+
+func TestTask_ListJSON(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	run(t, "task", "new", "json-task", "--content", "json payload")
+	out := run(t, "task", "list", "--json")
+
+	var payload struct {
+		Project string `json:"project"`
+		Tasks   []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("expected valid JSON payload, got error: %v\noutput:\n%s", err, out)
+	}
+	if payload.Project == "" {
+		t.Fatal("expected project in JSON payload")
+	}
+	if len(payload.Tasks) == 0 {
+		t.Fatal("expected at least one task in JSON payload")
+	}
+	if payload.Tasks[0].ID == "" {
+		t.Fatal("expected task id in JSON payload")
+	}
+}
+
+func TestTask_InvalidTransitionCodedError(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	run(t, "task", "new", "transition-task", "--content", "transition")
+	run(t, "task", "status", "transition-task", "completed")
+	_, err := runE(t, "task", "status", "transition-task", "pending", "--json")
+	if err == nil {
+		t.Fatal("expected invalid transition error")
+	}
+
+	type coded interface {
+		ErrorCode() string
+		ExitStatus() int
+	}
+	codedErr, ok := err.(coded)
+	if !ok {
+		t.Fatalf("expected coded error, got %T", err)
+	}
+	if codedErr.ErrorCode() != "invalid_transition" {
+		t.Fatalf("expected code invalid_transition, got %s", codedErr.ErrorCode())
+	}
+	if codedErr.ExitStatus() != 5 {
+		t.Fatalf("expected exit status 5, got %d", codedErr.ExitStatus())
+	}
+}
+
+func TestTask_WorktreeIDStable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	setup(t)
+
+	baseDir := t.TempDir()
+	mainRepo := filepath.Join(baseDir, "stable-id-repo")
+	worktreeRepo := filepath.Join(baseDir, "stable-id-worktree")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir main repo: %v", err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer os.Chdir(orig)
+
+	if err := os.Chdir(mainRepo); err != nil {
+		t.Fatalf("chdir main repo: %v", err)
+	}
+	runGit(t, mainRepo, "init")
+	runGit(t, mainRepo, "config", "user.email", "test@example.com")
+	runGit(t, mainRepo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(mainRepo, "README.md"), []byte("seed"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit(t, mainRepo, "add", "README.md")
+	runGit(t, mainRepo, "commit", "-m", "init")
+	runGit(t, mainRepo, "worktree", "add", "-b", "feature-y", worktreeRepo)
+
+	if err := os.Chdir(worktreeRepo); err != nil {
+		t.Fatalf("chdir worktree: %v", err)
+	}
+	run(t, "task", "new", "stable-task", "--content", "stable id")
+
+	worktreeOut := run(t, "task", "show", "stable-task", "--json")
+	if err := os.Chdir(mainRepo); err != nil {
+		t.Fatalf("chdir main repo: %v", err)
+	}
+	mainOut := run(t, "task", "show", "stable-task", "--json")
+
+	var worktreeTask struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(worktreeOut), &worktreeTask); err != nil {
+		t.Fatalf("invalid worktree json: %v", err)
+	}
+	var mainTask struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(mainOut), &mainTask); err != nil {
+		t.Fatalf("invalid main json: %v", err)
+	}
+
+	if worktreeTask.ID == "" || mainTask.ID == "" {
+		t.Fatalf("expected non-empty ids, got worktree=%q main=%q", worktreeTask.ID, mainTask.ID)
+	}
+	if worktreeTask.ID != mainTask.ID {
+		t.Fatalf("expected stable id across worktree and main repo, got %q vs %q", worktreeTask.ID, mainTask.ID)
 	}
 }
