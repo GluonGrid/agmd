@@ -501,3 +501,149 @@ func TestTask_ListInvalidRepoPathReturnsCodedError(t *testing.T) {
 		t.Fatalf("expected exit status 2, got %d", codedErr.ExitStatus())
 	}
 }
+
+func TestTask_AssignAndShowMetadata(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	run(t, "task", "new", "assign-task", "--content", "assignment content")
+	listOut := run(t, "task", "list", "--json")
+	var listPayload struct {
+		Tasks []struct {
+			ID string `json:"id"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listPayload); err != nil {
+		t.Fatalf("invalid list json: %v", err)
+	}
+	if len(listPayload.Tasks) == 0 || listPayload.Tasks[0].ID == "" {
+		t.Fatalf("expected task id in list payload, got: %s", listOut)
+	}
+	taskID := listPayload.Tasks[0].ID
+
+	assignOut := run(t, "task", "assign", taskID, "--workflow-id", "wf-123", "--worktree-path", "/tmp/wt", "--json")
+	var assignPayload struct {
+		OK         bool `json:"ok"`
+		Assignment struct {
+			WorkflowID   string `json:"workflow_id"`
+			WorktreePath string `json:"worktree_path"`
+		} `json:"assignment"`
+	}
+	if err := json.Unmarshal([]byte(assignOut), &assignPayload); err != nil {
+		t.Fatalf("invalid assign json: %v", err)
+	}
+	if !assignPayload.OK || assignPayload.Assignment.WorkflowID != "wf-123" || assignPayload.Assignment.WorktreePath != "/tmp/wt" {
+		t.Fatalf("unexpected assign payload: %+v", assignPayload)
+	}
+
+	showJSON := run(t, "task", "show", taskID, "--json")
+	var showPayload struct {
+		Assignment struct {
+			WorkflowID   string `json:"workflow_id"`
+			WorktreePath string `json:"worktree_path"`
+		} `json:"assignment"`
+	}
+	if err := json.Unmarshal([]byte(showJSON), &showPayload); err != nil {
+		t.Fatalf("invalid show json: %v", err)
+	}
+	if showPayload.Assignment.WorkflowID != "wf-123" || showPayload.Assignment.WorktreePath != "/tmp/wt" {
+		t.Fatalf("expected assignment metadata in show json, got %+v", showPayload)
+	}
+
+	showText := run(t, "task", "show", taskID)
+	if !strings.Contains(showText, "workflow_id:") || !strings.Contains(showText, "wf-123") {
+		t.Fatalf("expected workflow metadata in show text, got:\n%s", showText)
+	}
+}
+
+func TestTask_UnassignByID(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	run(t, "task", "new", "unassign-task", "--content", "assignment content")
+	listOut := run(t, "task", "list", "--json")
+	var listPayload struct {
+		Tasks []struct {
+			ID string `json:"id"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listPayload); err != nil {
+		t.Fatalf("invalid list json: %v", err)
+	}
+	taskID := listPayload.Tasks[0].ID
+
+	run(t, "task", "assign", taskID, "--workflow-id", "wf-xyz", "--json")
+	unassignOut := run(t, "task", "unassign", taskID, "--json")
+	var unassignPayload struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(unassignOut), &unassignPayload); err != nil {
+		t.Fatalf("invalid unassign json: %v", err)
+	}
+	if !unassignPayload.OK {
+		t.Fatalf("expected unassign ok payload, got: %s", unassignOut)
+	}
+
+	showJSON := run(t, "task", "show", taskID, "--json")
+	var showPayload struct {
+		Assignment *struct {
+			WorkflowID string `json:"workflow_id"`
+		} `json:"assignment"`
+	}
+	if err := json.Unmarshal([]byte(showJSON), &showPayload); err != nil {
+		t.Fatalf("invalid show json: %v", err)
+	}
+	if showPayload.Assignment != nil {
+		t.Fatalf("expected assignment to be removed, got %+v", showPayload.Assignment)
+	}
+}
+
+func TestTask_UnassignAllByWorkflowID(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	run(t, "task", "new", "workflow-a", "--content", "a")
+	run(t, "task", "new", "workflow-b", "--content", "b")
+	listOut := run(t, "task", "list", "--json")
+	var listPayload struct {
+		Tasks []struct {
+			ID string `json:"id"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listPayload); err != nil {
+		t.Fatalf("invalid list json: %v", err)
+	}
+	if len(listPayload.Tasks) < 2 {
+		t.Fatalf("expected at least two tasks, got: %s", listOut)
+	}
+
+	run(t, "task", "assign", listPayload.Tasks[0].ID, "--workflow-id", "wf-batch", "--json")
+	run(t, "task", "assign", listPayload.Tasks[1].ID, "--workflow-id", "wf-batch", "--json")
+
+	unassignAllOut := run(t, "task", "unassign", "--workflow-id", "wf-batch", "--all", "--json")
+	var unassignAllPayload struct {
+		OK      bool `json:"ok"`
+		Removed int  `json:"removed"`
+	}
+	if err := json.Unmarshal([]byte(unassignAllOut), &unassignAllPayload); err != nil {
+		t.Fatalf("invalid unassign-all json: %v", err)
+	}
+	if !unassignAllPayload.OK || unassignAllPayload.Removed != 2 {
+		t.Fatalf("expected 2 removed assignments, got %+v", unassignAllPayload)
+	}
+
+	for _, task := range listPayload.Tasks[:2] {
+		showJSON := run(t, "task", "show", task.ID, "--json")
+		var showPayload struct {
+			Assignment *struct {
+				WorkflowID string `json:"workflow_id"`
+			} `json:"assignment"`
+		}
+		if err := json.Unmarshal([]byte(showJSON), &showPayload); err != nil {
+			t.Fatalf("invalid show json: %v", err)
+		}
+		if showPayload.Assignment != nil {
+			t.Fatalf("expected assignment removed for task %s", task.ID)
+		}
+	}
+}

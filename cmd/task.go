@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"agmd/pkg/registry"
 
@@ -69,6 +70,17 @@ var taskPriority int
 var taskType string
 var taskFilterPriority string
 var taskFilterType string
+var taskWorkflowID string
+var taskWorktreePath string
+var taskUnassignAll bool
+
+type taskAssignment struct {
+	TaskID       string `json:"task_id"`
+	TaskName     string `json:"task_name"`
+	WorkflowID   string `json:"workflow_id"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	UpdatedAt    string `json:"updated_at"`
+}
 
 type codedTaskError struct {
 	Code     string
@@ -147,6 +159,8 @@ Subcommands:
   status      Update task status
   blocked-by  Add a dependency
   unblock     Remove a dependency
+  assign      Attach workflow assignment metadata
+  unassign    Remove workflow assignment metadata
 
 Examples:
   agmd task list                                    # List all tasks
@@ -207,7 +221,7 @@ Examples:
 }
 
 var taskShowCmd = &cobra.Command{
-	Use:   "show <name>",
+	Use:   "show <task-id-or-name>",
 	Short: "Show task content",
 	Long: `Display the content of a task.
 
@@ -222,7 +236,7 @@ Examples:
 }
 
 var taskDeleteCmd = &cobra.Command{
-	Use:     "delete <name>",
+	Use:     "delete <task-id-or-name>",
 	Aliases: []string{"del", "rm"},
 	Short:   "Delete a task",
 	Long: `Delete a task from the current project.
@@ -238,7 +252,7 @@ Examples:
 }
 
 var taskStatusCmd = &cobra.Command{
-	Use:   "status <task-name> <status>",
+	Use:   "status <task-id-or-name> <status>",
 	Short: "Update task status",
 	Long: `Update the status of a task.
 
@@ -254,7 +268,7 @@ Examples:
 }
 
 var taskBlockedByCmd = &cobra.Command{
-	Use:   "blocked-by <task-name> <dependency>",
+	Use:   "blocked-by <task-id-or-name> <dependency-id-or-name>",
 	Short: "Add a dependency to a task",
 	Long: `Add a dependency to a task.
 
@@ -268,7 +282,7 @@ Examples:
 }
 
 var taskUnblockCmd = &cobra.Command{
-	Use:   "unblock <task-name> <dependency>",
+	Use:   "unblock <task-id-or-name> <dependency-id-or-name>",
 	Short: "Remove a dependency from a task",
 	Long: `Remove a dependency from a task.
 
@@ -297,7 +311,7 @@ Examples:
 }
 
 var taskEditCmd = &cobra.Command{
-	Use:   "edit <task-name>",
+	Use:   "edit <task-id-or-name>",
 	Short: "Edit task priority or type",
 	Long: `Edit a task's priority or type.
 
@@ -313,6 +327,39 @@ Examples:
 	RunE:              runTaskEdit,
 }
 
+var taskAssignCmd = &cobra.Command{
+	Use:               "assign <task-id-or-name>",
+	Short:             "Assign a task to a workflow",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTaskName,
+	RunE:              runTaskAssign,
+}
+
+var taskUnassignCmd = &cobra.Command{
+	Use:   "unassign [task-id-or-name]",
+	Short: "Remove assignment metadata from tasks",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if taskUnassignAll {
+			if len(args) != 0 {
+				return newTaskError("invalid_input", "do not pass a task argument when using --all")
+			}
+			if strings.TrimSpace(taskWorkflowID) == "" {
+				return newTaskError("invalid_input", "--workflow-id is required with --all")
+			}
+			return nil
+		}
+		if len(args) != 1 {
+			return newTaskError("invalid_input", "specify a task id/name or use --workflow-id <id> --all")
+		}
+		if strings.TrimSpace(taskWorkflowID) != "" {
+			return newTaskError("invalid_input", "--workflow-id can only be used with --all")
+		}
+		return nil
+	},
+	ValidArgsFunction: completeTaskName,
+	RunE:              runTaskUnassign,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskListCmd)
@@ -324,6 +371,8 @@ func init() {
 	taskCmd.AddCommand(taskBlockedByCmd)
 	taskCmd.AddCommand(taskUnblockCmd)
 	taskCmd.AddCommand(taskEditCmd)
+	taskCmd.AddCommand(taskAssignCmd)
+	taskCmd.AddCommand(taskUnassignCmd)
 	taskCmd.PersistentFlags().BoolVar(&taskJSON, "json", false, "Output machine-readable JSON")
 
 	// Add --project/--repo-path and --feature flags to subcommands that need them
@@ -377,6 +426,17 @@ func init() {
 	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
 	taskCleanCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskCleanCmd.Flags().BoolVarP(&taskForce, "force", "f", false, "Skip confirmation prompt")
+
+	taskAssignCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskAssignCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
+	taskAssignCmd.Flags().StringVar(&taskWorkflowID, "workflow-id", "", "Workflow identifier for this assignment")
+	taskAssignCmd.Flags().StringVar(&taskWorktreePath, "worktree-path", "", "Optional worktree path metadata")
+	taskAssignCmd.MarkFlagRequired("workflow-id") //nolint:errcheck
+
+	taskUnassignCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskUnassignCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
+	taskUnassignCmd.Flags().StringVar(&taskWorkflowID, "workflow-id", "", "Workflow identifier to unassign from all tasks (requires --all)")
+	taskUnassignCmd.Flags().BoolVar(&taskUnassignAll, "all", false, "Unassign all tasks matching --workflow-id")
 }
 
 // getProjectName returns the project name from explicit selector or repository path.
@@ -462,18 +522,19 @@ func ensureTaskIdentity(task *Task, projectName string) {
 }
 
 type taskJSONItem struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Project             string   `json:"project"`
-	Subject             string   `json:"subject"`
-	Status              string   `json:"status"`
-	ComputedStatus      string   `json:"computed_status"`
-	Priority            int      `json:"priority"`
-	Type                string   `json:"type"`
-	Feature             string   `json:"feature,omitempty"`
-	DependsOn           []string `json:"depends_on"`
-	PendingDependencies []string `json:"pending_dependencies,omitempty"`
-	Content             string   `json:"content,omitempty"`
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	Project             string          `json:"project"`
+	Subject             string          `json:"subject"`
+	Status              string          `json:"status"`
+	ComputedStatus      string          `json:"computed_status"`
+	Priority            int             `json:"priority"`
+	Type                string          `json:"type"`
+	Feature             string          `json:"feature,omitempty"`
+	DependsOn           []string        `json:"depends_on"`
+	PendingDependencies []string        `json:"pending_dependencies,omitempty"`
+	Assignment          *taskAssignment `json:"assignment,omitempty"`
+	Content             string          `json:"content,omitempty"`
 }
 
 type taskListJSONPayload struct {
@@ -498,7 +559,7 @@ type taskMutationJSONPayload struct {
 	Status  string `json:"status,omitempty"`
 }
 
-func taskToJSONItem(task *Task, taskMap map[string]*Task, includeContent bool) taskJSONItem {
+func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string]taskAssignment, includeContent bool) taskJSONItem {
 	taskType := task.Type
 	if taskType == "" {
 		taskType = "task"
@@ -519,13 +580,17 @@ func taskToJSONItem(task *Task, taskMap map[string]*Task, includeContent bool) t
 	if status == StatusBlocked {
 		item.PendingDependencies = getPendingDependencies(task, taskMap)
 	}
+	if assignment, exists := assignments[task.ID]; exists {
+		assignmentCopy := assignment
+		item.Assignment = &assignmentCopy
+	}
 	if includeContent {
 		item.Content = task.Content
 	}
 	return item
 }
 
-func buildTaskListJSON(projectName, feature string, tasks []*Task, taskMap map[string]*Task, includeContent bool) taskListJSONPayload {
+func buildTaskListJSON(projectName, feature string, tasks []*Task, taskMap map[string]*Task, assignments map[string]taskAssignment, includeContent bool) taskListJSONPayload {
 	payload := taskListJSONPayload{
 		Project: projectName,
 		Feature: feature,
@@ -543,7 +608,7 @@ func buildTaskListJSON(projectName, feature string, tasks []*Task, taskMap map[s
 		case StatusCompleted:
 			payload.Counts.Completed++
 		}
-		payload.Tasks = append(payload.Tasks, taskToJSONItem(task, taskMap, includeContent))
+		payload.Tasks = append(payload.Tasks, taskToJSONItem(task, taskMap, assignments, includeContent))
 	}
 	payload.Counts.Total = len(tasks)
 	return payload
@@ -617,6 +682,43 @@ func getTaskPath(reg *registry.Registry, projectName, taskName string) string {
 // getTaskDir returns the path to a project's task directory
 func getTaskDir(reg *registry.Registry, projectName string) string {
 	return filepath.Join(reg.BasePath, "task", projectName)
+}
+
+func getTaskAssignmentsPath(reg *registry.Registry, projectName string) string {
+	return filepath.Join(getTaskDir(reg, projectName), "assignments.json")
+}
+
+func loadTaskAssignments(reg *registry.Registry, projectName string) (map[string]taskAssignment, error) {
+	assignmentsPath := getTaskAssignmentsPath(reg, projectName)
+	raw, err := os.ReadFile(assignmentsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]taskAssignment{}, nil
+		}
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return map[string]taskAssignment{}, nil
+	}
+	assignments := map[string]taskAssignment{}
+	if err := json.Unmarshal(raw, &assignments); err != nil {
+		return nil, fmt.Errorf("invalid assignments file: %w", err)
+	}
+	return assignments, nil
+}
+
+func saveTaskAssignments(reg *registry.Registry, projectName string, assignments map[string]taskAssignment) error {
+	taskDir := getTaskDir(reg, projectName)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		return err
+	}
+	assignmentsPath := getTaskAssignmentsPath(reg, projectName)
+	encoded, err := json.MarshalIndent(assignments, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	return os.WriteFile(assignmentsPath, encoded, 0o644)
 }
 
 // loadTask loads a task from file
@@ -1265,6 +1367,10 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load tasks: %w", err)
 	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
 
 	// Filter by feature if specified
 	if taskFeature != "" {
@@ -1274,7 +1380,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	if len(tasks) == 0 {
 		if taskJSON {
 			emptyTaskMap := map[string]*Task{}
-			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, false))
+			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, assignments, false))
 		}
 		if taskFeature != "" {
 			fmt.Printf("%s No tasks for project '%s' with feature '%s'\n", yellow("!"), projectName, taskFeature)
@@ -1370,7 +1476,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		visible = filtered
 	}
 	if taskJSON {
-		return printJSON(buildTaskListJSON(projectName, taskFeature, visible, taskMap, false))
+		return printJSON(buildTaskListJSON(projectName, taskFeature, visible, taskMap, assignments, false))
 	}
 
 	// Count by status
@@ -1650,9 +1756,13 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	taskMap := map[string]*Task{
 		task.Name: task,
 	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
 
 	if taskJSON {
-		return printJSON(taskToJSONItem(task, taskMap, true))
+		return printJSON(taskToJSONItem(task, taskMap, assignments, true))
 	}
 
 	fmt.Printf("%s %s\n", dim("subject:"), task.Subject)
@@ -1669,6 +1779,12 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 	if len(task.DependsOn) > 0 {
 		fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(task.DependsOn, ", "))
+	}
+	if assignment, exists := assignments[task.ID]; exists {
+		fmt.Printf("%s %s\n", dim("workflow_id:"), assignment.WorkflowID)
+		if assignment.WorktreePath != "" {
+			fmt.Printf("%s %s\n", dim("worktree_path:"), assignment.WorktreePath)
+		}
 	}
 	if task.Content != "" {
 		fmt.Printf("\n%s\n", task.Content)
@@ -1690,6 +1806,10 @@ func runTaskShowAll(reg *registry.Registry) error {
 	if err != nil {
 		return fmt.Errorf("failed to load tasks: %w", err)
 	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
 
 	// Filter by feature if specified
 	if taskFeature != "" {
@@ -1699,7 +1819,7 @@ func runTaskShowAll(reg *registry.Registry) error {
 	if len(tasks) == 0 {
 		if taskJSON {
 			emptyTaskMap := map[string]*Task{}
-			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, true))
+			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, assignments, true))
 		}
 		if taskFeature != "" {
 			return newTaskError("not_found", "no tasks found for project '%s' with feature '%s'", projectName, taskFeature)
@@ -1714,7 +1834,7 @@ func runTaskShowAll(reg *registry.Registry) error {
 	}
 	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
 	if taskJSON {
-		return printJSON(buildTaskListJSON(projectName, taskFeature, sorted, taskMap, true))
+		return printJSON(buildTaskListJSON(projectName, taskFeature, sorted, taskMap, assignments, true))
 	}
 
 	fmt.Printf("Tasks for: %s\n\n", cyan(projectName))
@@ -1736,6 +1856,12 @@ func runTaskShowAll(reg *registry.Registry) error {
 		}
 		if len(t.DependsOn) > 0 {
 			fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(t.DependsOn, ", "))
+		}
+		if assignment, exists := assignments[t.ID]; exists {
+			fmt.Printf("%s %s\n", dim("workflow_id:"), assignment.WorkflowID)
+			if assignment.WorktreePath != "" {
+				fmt.Printf("%s %s\n", dim("worktree_path:"), assignment.WorktreePath)
+			}
 		}
 		if t.Content != "" {
 			fmt.Printf("\n%s\n", t.Content)
@@ -2201,5 +2327,157 @@ func runTaskUnblock(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s Removed dependency: '%s' is no longer blocked by '%s'\n", green("✓"), taskName, dependency)
+	return nil
+}
+
+func runTaskAssign(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+
+	if strings.TrimSpace(taskWorkflowID) == "" {
+		return newTaskError("invalid_input", "--workflow-id is required")
+	}
+
+	reg, err := registry.New()
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+	if !reg.Exists() {
+		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
+	}
+
+	projectName, taskRef, err := resolveTaskProjectAndRef(args[0])
+	if err != nil {
+		return err
+	}
+
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
+	}
+
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
+
+	assignment := taskAssignment{
+		TaskID:       task.ID,
+		TaskName:     task.Name,
+		WorkflowID:   strings.TrimSpace(taskWorkflowID),
+		WorktreePath: strings.TrimSpace(taskWorktreePath),
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	assignments[task.ID] = assignment
+
+	if err := saveTaskAssignments(reg, projectName, assignments); err != nil {
+		return fmt.Errorf("failed to save assignments: %w", err)
+	}
+
+	if taskJSON {
+		return printJSON(struct {
+			OK         bool           `json:"ok"`
+			Action     string         `json:"action"`
+			Project    string         `json:"project"`
+			Task       string         `json:"task"`
+			ID         string         `json:"id"`
+			Assignment taskAssignment `json:"assignment"`
+		}{
+			OK:         true,
+			Action:     "assign",
+			Project:    projectName,
+			Task:       task.Name,
+			ID:         task.ID,
+			Assignment: assignment,
+		})
+	}
+
+	fmt.Printf("%s Assigned task '%s' to workflow '%s'\n", green("✓"), task.Name, assignment.WorkflowID)
+	return nil
+}
+
+func runTaskUnassign(cmd *cobra.Command, args []string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+
+	reg, err := registry.New()
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+	if !reg.Exists() {
+		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
+	}
+
+	if taskUnassignAll {
+		projectName, projectErr := getProjectName()
+		if projectErr != nil {
+			return projectErr
+		}
+		assignments, loadErr := loadTaskAssignments(reg, projectName)
+		if loadErr != nil {
+			return fmt.Errorf("failed to load assignments: %w", loadErr)
+		}
+		removed := 0
+		workflowID := strings.TrimSpace(taskWorkflowID)
+		for key, assignment := range assignments {
+			if assignment.WorkflowID == workflowID {
+				delete(assignments, key)
+				removed++
+			}
+		}
+		if removed == 0 {
+			return newTaskError("not_found", "no assignments found for workflow '%s' in project '%s'", workflowID, projectName)
+		}
+		if saveErr := saveTaskAssignments(reg, projectName, assignments); saveErr != nil {
+			return fmt.Errorf("failed to save assignments: %w", saveErr)
+		}
+		if taskJSON {
+			return printJSON(struct {
+				OK         bool   `json:"ok"`
+				Action     string `json:"action"`
+				Project    string `json:"project"`
+				WorkflowID string `json:"workflow_id"`
+				Removed    int    `json:"removed"`
+			}{
+				OK:         true,
+				Action:     "unassign",
+				Project:    projectName,
+				WorkflowID: workflowID,
+				Removed:    removed,
+			})
+		}
+		fmt.Printf("%s Unassigned %d task(s) from workflow '%s'\n", green("✓"), removed, workflowID)
+		return nil
+	}
+
+	projectName, taskRef, projectErr := resolveTaskProjectAndRef(args[0])
+	if projectErr != nil {
+		return projectErr
+	}
+	task, taskErr := resolveTaskRef(reg, projectName, taskRef)
+	if taskErr != nil {
+		return taskErr
+	}
+
+	assignments, loadErr := loadTaskAssignments(reg, projectName)
+	if loadErr != nil {
+		return fmt.Errorf("failed to load assignments: %w", loadErr)
+	}
+	if _, exists := assignments[task.ID]; !exists {
+		return newTaskError("not_found", "task '%s' is not assigned in project '%s'", task.Name, projectName)
+	}
+	delete(assignments, task.ID)
+	if saveErr := saveTaskAssignments(reg, projectName, assignments); saveErr != nil {
+		return fmt.Errorf("failed to save assignments: %w", saveErr)
+	}
+
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "unassign",
+			Project: projectName,
+			Task:    task.Name,
+			ID:      task.ID,
+		})
+	}
+	fmt.Printf("%s Unassigned task '%s'\n", green("✓"), task.Name)
 	return nil
 }

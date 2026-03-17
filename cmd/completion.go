@@ -123,6 +123,9 @@ func completeTaskName(cmd *cobra.Command, args []string, toComplete string) ([]s
 		if strings.HasPrefix(t.Name, toComplete) {
 			completions = append(completions, t.Name)
 		}
+		if t.ID != "" && strings.HasPrefix(t.ID, toComplete) {
+			completions = append(completions, t.ID)
+		}
 	}
 
 	return completions, cobra.ShellCompDirectiveNoFileComp
