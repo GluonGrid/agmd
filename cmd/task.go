@@ -386,6 +386,7 @@ func getProjectName() (string, error) {
 	}
 
 	targetPath := taskRepoPath
+	explicitRepoPath := taskRepoPath != ""
 	if targetPath == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -396,6 +397,9 @@ func getProjectName() (string, error) {
 
 	canonicalRepoPath, err := resolveCanonicalRepoPath(targetPath)
 	if err != nil {
+		if explicitRepoPath {
+			return "", newTaskError("invalid_input", "invalid --repo-path '%s': %v", taskRepoPath, err)
+		}
 		absPath, absErr := filepath.Abs(targetPath)
 		if absErr != nil {
 			return "", fmt.Errorf("failed to resolve project path '%s': %w", targetPath, absErr)
@@ -551,6 +555,58 @@ func parseTaskRef(name string) (string, string, bool) {
 	}
 	parts := strings.SplitN(name, "/", 2)
 	return parts[0], parts[1], true
+}
+
+func resolveTaskRef(reg *registry.Registry, projectName, taskRef string) (*Task, error) {
+	// Fast path for name lookup.
+	if !strings.HasPrefix(taskRef, "tsk_") {
+		taskPath := getTaskPath(reg, projectName, taskRef)
+		if _, err := os.Stat(taskPath); err == nil {
+			task, loadErr := loadTask(taskPath)
+			if loadErr != nil {
+				return nil, fmt.Errorf("failed to load task: %w", loadErr)
+			}
+			ensureTaskIdentity(task, projectName)
+			return task, nil
+		}
+	}
+
+	// ID or fallback lookup.
+	tasks, err := loadProjectTasks(reg, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tasks: %w", err)
+	}
+	for _, task := range tasks {
+		if task.ID == taskRef || task.Name == taskRef {
+			return task, nil
+		}
+	}
+	return nil, newTaskError("not_found", "task '%s' not found in project '%s'", taskRef, projectName)
+}
+
+func resolveTaskProjectAndRef(taskArg string) (string, string, error) {
+	projectFromArg, taskRef, hasProjectInArg := parseTaskRef(taskArg)
+	if hasProjectInArg && taskProject != "" && projectFromArg != taskProject {
+		return "", "", newTaskError(
+			"project_mismatch",
+			"task reference '%s' does not match --project '%s'",
+			projectFromArg,
+			taskProject,
+		)
+	}
+
+	projectName := taskProject
+	if hasProjectInArg {
+		projectName = projectFromArg
+	}
+	if projectName == "" {
+		resolved, err := getProjectName()
+		if err != nil {
+			return "", "", err
+		}
+		projectName = resolved
+	}
+	return projectName, taskRef, nil
 }
 
 // getTaskPath returns the path to a task file
@@ -1474,13 +1530,21 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Validate that all dependencies exist
+		// Normalize dependencies to task names and de-duplicate.
+		normalized := make([]string, 0, len(dependsOn))
+		seen := make(map[string]bool)
 		for _, dep := range dependsOn {
-			depPath := getTaskPath(reg, projectName, dep)
-			if _, err := os.Stat(depPath); os.IsNotExist(err) {
+			depTask, depErr := resolveTaskRef(reg, projectName, dep)
+			if depErr != nil {
 				return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dep, projectName)
 			}
+			name := depTask.Name
+			if !seen[name] {
+				seen[name] = true
+				normalized = append(normalized, name)
+			}
 		}
+		dependsOn = normalized
 	}
 
 	// Build task frontmatter
@@ -1566,49 +1630,23 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
-
-	// Check if name includes project (project/task-name)
-	projectNameFromName, taskName, hasProjectInName := parseTaskRef(name)
-	if hasProjectInName && taskProject != "" && projectNameFromName != taskProject {
-		return newTaskError(
-			"project_mismatch",
-			"task reference '%s' does not match --project '%s'",
-			projectNameFromName,
-			taskProject,
-		)
+	projectName, taskRef, err := resolveTaskProjectAndRef(name)
+	if err != nil {
+		return err
 	}
-
-	projectName := taskProject
-	if hasProjectInName {
-		projectName = projectNameFromName
-	}
-	if projectName == "" {
-		resolved, err := getProjectName()
-		if err != nil {
-			return err
-		}
-		projectName = resolved
-	}
-
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
 	}
 
 	if taskRaw {
-		raw, err := os.ReadFile(taskPath)
-		if err != nil {
-			return fmt.Errorf("failed to read task: %w", err)
+		raw, readErr := os.ReadFile(task.FilePath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read task: %w", readErr)
 		}
 		fmt.Print(string(raw))
 		return nil
 	}
-
-	task, err := loadTask(taskPath)
-	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
-	}
-	ensureTaskIdentity(task, projectName)
 	taskMap := map[string]*Task{
 		task.Name: task,
 	}
@@ -1818,7 +1856,7 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 func runTaskEdit(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	taskName := args[0]
+	taskArg := args[0]
 
 	// Check if at least one flag is provided
 	if taskEditPriority == -1 && taskEditType == "" {
@@ -1844,21 +1882,16 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
 
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	task, err := loadTask(taskPath)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return err
 	}
-	ensureTaskIdentity(task, projectName)
+	taskName := task.Name
 
 	// Track changes for output message
 	var changes []string
@@ -1904,7 +1937,7 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 	blue := color.New(color.FgBlue).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
 
-	name := args[0]
+	taskArg := args[0]
 
 	reg, err := registry.New()
 	if err != nil {
@@ -1915,17 +1948,18 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
 
-	taskPath := getTaskPath(reg, projectName, name)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "task '%s' not found in project '%s'", name, projectName)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
 	}
-
-	taskID := computeTaskID(projectName, name)
+	name := task.Name
+	taskPath := task.FilePath
+	taskID := task.ID
 
 	// Show what will be deleted
 	if !taskJSON {
@@ -1980,7 +2014,7 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 func runTaskStatus(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	taskName := args[0]
+	taskArg := args[0]
 	newStatus := strings.ToLower(args[1])
 
 	// Validate status
@@ -1998,21 +2032,16 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
 
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	task, err := loadTask(taskPath)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return err
 	}
-	ensureTaskIdentity(task, projectName)
+	taskName := task.Name
 
 	if task.Status == "completed" && newStatus != "completed" {
 		return newTaskError(
@@ -2046,35 +2075,37 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 func runTaskBlockedBy(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	taskName := args[0]
-	dependency := args[1]
+	taskArg := args[0]
+	dependencyArg := args[1]
 
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
-
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	// Check dependency exists
-	depPath := getTaskPath(reg, projectName, dependency)
-	if _, err := os.Stat(depPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dependency, projectName)
-	}
-
-	task, err := loadTask(taskPath)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return err
 	}
-	ensureTaskIdentity(task, projectName)
+	dependencyProject, dependencyRef, hasDependencyProject := parseTaskRef(dependencyArg)
+	if hasDependencyProject && dependencyProject != projectName {
+		return newTaskError(
+			"project_mismatch",
+			"dependency reference '%s' does not match project '%s'",
+			dependencyProject,
+			projectName,
+		)
+	}
+	dependencyTask, depErr := resolveTaskRef(reg, projectName, dependencyRef)
+	if depErr != nil {
+		return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dependencyArg, projectName)
+	}
+	taskName := task.Name
+	dependency := dependencyTask.Name
 
 	// Check if already depends on it
 	for _, dep := range task.DependsOn {
@@ -2106,29 +2137,37 @@ func runTaskBlockedBy(cmd *cobra.Command, args []string) error {
 func runTaskUnblock(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	taskName := args[0]
-	dependency := args[1]
+	taskArg := args[0]
+	dependencyArg := args[1]
 
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
-
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return newTaskError("not_found", "task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	task, err := loadTask(taskPath)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return err
 	}
-	ensureTaskIdentity(task, projectName)
+	dependencyProject, dependencyRef, hasDependencyProject := parseTaskRef(dependencyArg)
+	if hasDependencyProject && dependencyProject != projectName {
+		return newTaskError(
+			"project_mismatch",
+			"dependency reference '%s' does not match project '%s'",
+			dependencyProject,
+			projectName,
+		)
+	}
+	dependencyTask, depErr := resolveTaskRef(reg, projectName, dependencyRef)
+	if depErr != nil {
+		return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dependencyArg, projectName)
+	}
+	taskName := task.Name
+	dependency := dependencyTask.Name
 
 	// Remove dependency
 	found := false

@@ -429,3 +429,75 @@ func TestTask_WorktreeIDStable(t *testing.T) {
 		t.Fatalf("expected stable id across worktree and main repo, got %q vs %q", worktreeTask.ID, mainTask.ID)
 	}
 }
+
+func TestTask_StatusAndShowByID(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	run(t, "task", "new", "id-task", "--content", "id content")
+	listOut := run(t, "task", "list", "--json")
+	var listPayload struct {
+		Tasks []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listPayload); err != nil {
+		t.Fatalf("invalid list json: %v", err)
+	}
+	if len(listPayload.Tasks) == 0 || listPayload.Tasks[0].ID == "" {
+		t.Fatalf("expected task id in list payload, got: %s", listOut)
+	}
+	taskID := listPayload.Tasks[0].ID
+
+	statusOut := run(t, "task", "status", taskID, "completed", "--json")
+	var statusPayload struct {
+		OK     bool   `json:"ok"`
+		Task   string `json:"task"`
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(statusOut), &statusPayload); err != nil {
+		t.Fatalf("invalid status json: %v", err)
+	}
+	if !statusPayload.OK || statusPayload.ID != taskID || statusPayload.Status != "completed" {
+		t.Fatalf("unexpected status payload: %+v", statusPayload)
+	}
+
+	showOut := run(t, "task", "show", taskID, "--json")
+	var showPayload struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(showOut), &showPayload); err != nil {
+		t.Fatalf("invalid show json: %v", err)
+	}
+	if showPayload.ID != taskID || showPayload.Name != "id-task" || showPayload.Content != "id content" {
+		t.Fatalf("unexpected show payload: %+v", showPayload)
+	}
+}
+
+func TestTask_ListInvalidRepoPathReturnsCodedError(t *testing.T) {
+	setup(t)
+	chdir(t)
+
+	_, err := runE(t, "task", "list", "--repo-path", "/path/that/does/not/exist", "--json")
+	if err == nil {
+		t.Fatal("expected error for invalid repo-path")
+	}
+	type coded interface {
+		ErrorCode() string
+		ExitStatus() int
+	}
+	codedErr, ok := err.(coded)
+	if !ok {
+		t.Fatalf("expected coded error, got %T", err)
+	}
+	if codedErr.ErrorCode() != "invalid_input" {
+		t.Fatalf("expected code invalid_input, got %s", codedErr.ErrorCode())
+	}
+	if codedErr.ExitStatus() != 2 {
+		t.Fatalf("expected exit status 2, got %d", codedErr.ExitStatus())
+	}
+}
