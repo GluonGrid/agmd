@@ -43,6 +43,13 @@ var validTaskTypes = map[string]bool{
 	"chore":   true,
 }
 
+// Valid stored task statuses (computed statuses like "ready"/"blocked" are derived).
+var validTaskStatuses = map[string]bool{
+	"pending":     true,
+	"in_progress": true,
+	"completed":   true,
+}
+
 // ComputedStatus represents the computed status of a task
 type ComputedStatus string
 
@@ -161,6 +168,7 @@ Subcommands:
   unblock     Remove a dependency
   assign      Attach workflow assignment metadata
   unassign    Remove workflow assignment metadata
+  web         Launch a local web UI to browse and edit tasks
 
 Examples:
   agmd task list                                    # List all tasks
@@ -2137,19 +2145,38 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// setTaskStatus validates newStatus and applies it to task, enforcing the
+// completed -> non-completed transition guard. It mutates task.Status but does
+// not persist the task; callers are responsible for saving. Shared by the CLI
+// status command and the web PATCH handler so validation stays identical.
+func setTaskStatus(task *Task, newStatus string) error {
+	newStatus = strings.ToLower(newStatus)
+
+	if !validTaskStatuses[newStatus] {
+		return newTaskError("invalid_input", "invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
+	}
+
+	if task.Status == "completed" && newStatus != "completed" {
+		return newTaskError(
+			"invalid_transition",
+			"invalid status transition for task '%s': completed -> %s",
+			task.Name,
+			newStatus,
+		)
+	}
+
+	task.Status = newStatus
+	return nil
+}
+
 func runTaskStatus(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
 	taskArg := args[0]
 	newStatus := strings.ToLower(args[1])
 
-	// Validate status
-	validStatuses := map[string]bool{
-		"pending":     true,
-		"in_progress": true,
-		"completed":   true,
-	}
-	if !validStatuses[newStatus] {
+	// Validate status before touching the registry to preserve CLI behavior.
+	if !validTaskStatuses[newStatus] {
 		return newTaskError("invalid_input", "invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
 	}
 
@@ -2169,16 +2196,9 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 	}
 	taskName := task.Name
 
-	if task.Status == "completed" && newStatus != "completed" {
-		return newTaskError(
-			"invalid_transition",
-			"invalid status transition for task '%s': completed -> %s",
-			taskName,
-			newStatus,
-		)
+	if err := setTaskStatus(task, newStatus); err != nil {
+		return err
 	}
-
-	task.Status = newStatus
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
 	}

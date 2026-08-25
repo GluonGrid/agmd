@@ -457,12 +457,21 @@ agmd task show setup-db                   # Show task content
 agmd task show --all                      # Show all tasks with content
 agmd task delete setup-db --force         # Delete task
 agmd task clean                           # Delete all completed tasks
+
+# Browse and edit tasks in a local web UI
+agmd task web                             # Serve on a free port and open the browser
+agmd task web --no-open                   # Serve without opening a browser
+agmd task web --port 8765                 # Serve on a fixed port
 ```
 
 **Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
 **Task types:** bug, feature, task (default, hidden), chore
 
 Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Use `--feature` to scope tasks to features. The `--status`, `--priority`, and `--type` flags filter the list. Dependencies via `--blocked-by` are validated on creation.
+
+`agmd task web` launches a self-contained local UI (no build step, works offline) that aggregates tasks across every project in your registry. Filter by project/status/priority/type/feature, edit status and priority inline, or open a task to edit its subject/type/feature/content. Edits write straight back to the task files, so they show up immediately in `agmd task list`.
+
+The web UI can also **run selected tasks with Claude Code**: tick the tasks you want, click "▶ Run selected", pick a permission mode, and agmd spawns a `claude` session with a `/goal` prompt to implement them. The chosen tasks are flipped to in-progress, the run's transcript streams live in a console panel, and you get a `claude --resume <id>` hint to continue the session interactively once it finishes. You can launch several runs at once, minimize or close the console, and reopen any run later from the **Sessions** menu in the top bar. The server stays bound to `127.0.0.1` and asks for confirmation before launching, since this spawns processes that can modify your files.
 
 ## File Management
 

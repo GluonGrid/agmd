@@ -1,0 +1,1599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agmd tasks</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-elev: #161b22;
+    --bg-elev2: #1c2430;
+    --border: #2a3340;
+    --border-soft: #222b36;
+    --fg: #e6edf3;
+    --fg-dim: #9aa7b4;
+    --fg-faint: #6b7785;
+    --accent: #3b82f6;
+    --accent-hover: #2f6fd6;
+    --danger: #f87171;
+    --ok: #34d399;
+    --shadow: 0 12px 40px rgba(0,0,0,.55);
+
+    /* priority colors */
+    --p0: #f43f5e;
+    --p1: #fb923c;
+    --p2: #eab308;
+    --p3: #38bdf8;
+    --p4: #8b95a3;
+
+    /* status colors */
+    --st-ready: #22c55e;
+    --st-in_progress: #3b82f6;
+    --st-blocked: #f97316;
+    --st-completed: #8b95a3;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+
+  /* ---------- Layout ---------- */
+  header.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 22px;
+    background: linear-gradient(180deg, #11161e, #0d1117);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: .2px;
+  }
+  .brand .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+  .brand small { color: var(--fg-faint); font-weight: 500; font-size: 12px; }
+
+  .topbar .spacer { flex: 1; }
+
+  .summary {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-soft);
+    color: var(--fg-dim);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .chip b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .chip .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block;
+  }
+
+  main { padding: 18px 22px 60px; max-width: 1500px; margin: 0 auto; }
+
+  /* ---------- Toolbar / filters ---------- */
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--fg-faint);
+    padding-left: 2px;
+  }
+
+  select, input[type=text], input[type=search], textarea {
+    background: var(--bg-elev);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .12s, box-shadow .12s;
+  }
+  select:focus, input:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(59,130,246,.25);
+  }
+  select { cursor: pointer; appearance: none; padding-right: 26px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M1 3l4 4 4-4' stroke='%239aa7b4' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+  }
+  input[type=search] { min-width: 220px; }
+
+  .grow { flex: 1; min-width: 200px; }
+
+  button {
+    background: var(--bg-elev);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  button:hover { background: var(--bg-elev2); border-color: #34404e; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+
+  /* ---------- Table ---------- */
+  .table-wrap {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--bg-elev);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--fg-faint);
+    font-weight: 600;
+    padding: 11px 14px;
+    background: #131922;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+  }
+  tbody tr { cursor: pointer; transition: background .1s; }
+  tbody tr:hover { background: #1a212b; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .subject { font-weight: 600; color: var(--fg); }
+  .tname {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--fg-faint);
+    margin-top: 1px;
+  }
+  .proj-cell { color: var(--fg-dim); font-size: 12.5px; }
+  .feat-cell { color: var(--fg-dim); font-size: 12.5px; }
+  .feat-cell .empty { color: var(--fg-faint); }
+
+  /* badges */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .2px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .type-tag {
+    font-size: 11px;
+    color: var(--fg-dim);
+    text-transform: capitalize;
+  }
+
+  /* inline selects, themed by status/priority via inline style */
+  select.inline {
+    padding: 4px 24px 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    border-width: 1px;
+  }
+
+  .empty-state {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--fg-faint);
+  }
+  .empty-state .big { font-size: 16px; color: var(--fg-dim); margin-bottom: 4px; }
+
+  /* ---------- Drawer ---------- */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s;
+    z-index: 40;
+  }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+
+  .drawer {
+    position: fixed;
+    top: 0; right: 0;
+    height: 100%;
+    width: min(560px, 100%);
+    background: var(--bg-elev);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    transform: translateX(100%);
+    transition: transform .22s ease;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+  }
+  .drawer.open { transform: translateX(0); }
+
+  .drawer-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .drawer-head .meta { flex: 1; min-width: 0; }
+  .drawer-head h2 { margin: 0 0 4px; font-size: 16px; line-height: 1.3; }
+  .drawer-head .submeta {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--fg-faint);
+    word-break: break-all;
+  }
+  .iconbtn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fg-dim);
+    font-size: 20px;
+    line-height: 1;
+    padding: 4px 9px;
+    border-radius: 8px;
+  }
+  .iconbtn:hover { background: var(--bg-elev2); color: var(--fg); }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .form-row { display: flex; flex-direction: column; gap: 5px; }
+  .form-row label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--fg-faint);
+  }
+  .form-row textarea {
+    min-height: 240px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .form-2col { display: flex; gap: 14px; }
+  .form-2col .form-row { flex: 1; }
+
+  .deps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .deps .dep {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--bg-elev2);
+    border: 1px solid var(--border-soft);
+    color: var(--fg-dim);
+  }
+  .deps .dep.pending { color: var(--st-blocked); border-color: rgba(249,115,22,.4); }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+  }
+  .meta-grid .cell { background: var(--bg-elev2); border:1px solid var(--border-soft); border-radius:8px; padding:8px 10px; }
+  .meta-grid .cell .k { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--fg-faint); }
+  .meta-grid .cell .v { margin-top:3px; }
+
+  .drawer-foot {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    align-items: center;
+  }
+  .drawer-foot .err { flex:1; color: var(--danger); font-size:12.5px; }
+
+  /* ---------- Toasts ---------- */
+  #toasts {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 60;
+    align-items: center;
+  }
+  .toast {
+    background: var(--bg-elev2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    box-shadow: var(--shadow);
+    max-width: 460px;
+    animation: toastin .2s ease;
+  }
+  .toast.error { border-left-color: var(--danger); }
+  .toast.ok { border-left-color: var(--ok); }
+  @keyframes toastin { from { opacity:0; transform: translateY(8px);} to {opacity:1; transform:none;} }
+
+  /* ---------- Global error banner ---------- */
+  #banner {
+    display: none;
+    margin: 0 0 16px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: rgba(248,113,113,.12);
+    border: 1px solid rgba(248,113,113,.4);
+    color: #fecaca;
+  }
+  #banner.show { display: block; }
+  #banner button { margin-left: 10px; padding: 4px 10px; }
+
+  .hidden { display: none !important; }
+
+  /* ---------- Selection + run ---------- */
+  th.selcol, td.selcol { width: 30px; text-align: center; padding-left: 14px; padding-right: 0; }
+  input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; margin: 0; vertical-align: middle; }
+
+  button.run { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.run:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  /* ---------- Modal ---------- */
+  .modal-scrim {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: none; align-items: center; justify-content: center; z-index: 60;
+  }
+  .modal-scrim.open { display: flex; }
+  .modal {
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
+    width: min(540px, 92%); box-shadow: var(--shadow); padding: 20px 22px;
+  }
+  .modal h3 { margin: 0 0 6px; font-size: 16px; }
+  .modal p { color: var(--fg-dim); margin: 0 0 14px; font-size: 13px; }
+  .modal p .mono { font-family: ui-monospace, Menlo, monospace; color: var(--accent); }
+  .modal .tasklist {
+    max-height: 170px; overflow: auto; border: 1px solid var(--border-soft);
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 14px;
+  }
+  .modal .tasklist div { padding: 2px 0; color: var(--fg-dim); font-size: 12.5px; }
+  .modal .tasklist .mono { font-family: ui-monospace, Menlo, monospace; color: var(--fg-faint); }
+  .modal .form-row { margin-bottom: 14px; }
+  .modal .form-row label {
+    display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--fg-faint); margin-bottom: 5px;
+  }
+  .modal .form-row select { width: 100%; }
+  .modal .warn {
+    border-radius: 8px; padding: 8px 11px; font-size: 12px; margin-bottom: 16px; line-height: 1.45;
+  }
+  .modal .warn.danger { background: rgba(248,113,113,.09); border: 1px solid rgba(248,113,113,.32); color: #fca5a5; }
+  .modal .warn.soft { background: rgba(59,130,246,.08); border: 1px solid rgba(59,130,246,.28); color: #93c5fd; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* ---------- Live run console ---------- */
+  .run-console {
+    position: fixed; right: 18px; bottom: 18px; width: min(580px, 94%); max-height: 64vh;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow); display: none; flex-direction: column; z-index: 55;
+  }
+  .run-console.open { display: flex; }
+  .run-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+  .run-head .stat { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--fg-dim); }
+  .run-head .spacer { flex: 1; }
+  .run-head button { padding: 5px 10px; font-size: 12px; }
+  .run-meta { padding: 9px 14px; border-bottom: 1px solid var(--border-soft); font-size: 11px; color: var(--fg-faint); font-family: ui-monospace, Menlo, monospace; word-break: break-all; line-height: 1.6; }
+  .run-meta b { color: var(--fg-dim); font-weight: 600; }
+  .run-events { overflow: auto; padding: 4px 0; }
+  .run-ev { padding: 7px 14px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .run-ev:last-child { border-bottom: none; }
+  .run-ev .who { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--fg-faint); margin-bottom: 3px; }
+  .run-ev.assistant .who { color: var(--st-in_progress); }
+  .run-ev.summary { color: var(--fg-dim); font-style: italic; }
+  .run-empty { padding: 22px 14px; text-align: center; color: var(--fg-faint); font-size: 12.5px; }
+  .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--st-in_progress); animation: pulse 1.2s infinite; }
+  .dot-done { width: 9px; height: 9px; border-radius: 50%; background: var(--st-ready); }
+  .dot-err { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+  /* ---------- Sessions tray ---------- */
+  .runs-wrap { position: relative; }
+  .runs-btn { display: inline-flex; align-items: center; gap: 7px; }
+  .badge-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .badge-count.idle { background: var(--fg-faint); }
+  .runs-tray {
+    position: absolute; top: calc(100% + 8px); right: 0; width: 340px; max-height: 60vh; overflow: auto;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); z-index: 58; padding: 6px;
+  }
+  .runs-tray-head { padding: 6px 8px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--fg-faint); }
+  .run-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; cursor: pointer;
+  }
+  .run-item:hover { background: var(--bg-elev2); }
+  .run-item.active { background: rgba(59,130,246,.12); }
+  .run-item .ri-main { flex: 1; min-width: 0; }
+  .run-item .ri-title { font-size: 12.5px; color: var(--fg); font-family: ui-monospace, Menlo, monospace; }
+  .run-item .ri-sub { font-size: 11.5px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-item .ri-stat { font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--fg-faint); }
+  .runs-empty { padding: 14px 10px; color: var(--fg-faint); font-size: 12.5px; text-align: center; }
+
+  /* ---------- Console title + minimized state ---------- */
+  .run-title { font-size: 12px; color: var(--fg-faint); font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+  .run-console.min { width: auto; min-width: 230px; max-height: none; }
+  .run-console.min .run-meta, .run-console.min .run-events { display: none; }
+  .run-console.min .run-head { cursor: pointer; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mono">agmd</span> tasks <small>local task manager</small></div>
+    <div class="spacer"></div>
+    <div class="summary" id="summary"></div>
+    <div class="runs-wrap">
+      <button id="btn-runs" class="runs-btn hidden">Sessions <span id="runs-badge" class="badge-count">0</span></button>
+      <div class="runs-tray hidden" id="runs-tray">
+        <div class="runs-tray-head">Claude Code sessions</div>
+        <div id="runs-list"></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="banner"></div>
+
+    <div class="filters">
+      <div class="field">
+        <label for="f-project">Project</label>
+        <select id="f-project"></select>
+      </div>
+      <div class="field">
+        <label for="f-status">Status</label>
+        <select id="f-status">
+          <option value="">All</option>
+          <option value="ready">ready</option>
+          <option value="in_progress">in_progress</option>
+          <option value="blocked">blocked</option>
+          <option value="completed">completed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-priority">Priority</label>
+        <select id="f-priority">
+          <option value="">All</option>
+          <option value="0">P0</option>
+          <option value="1">P1</option>
+          <option value="2">P2</option>
+          <option value="3">P3</option>
+          <option value="4">P4</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-type">Type</label>
+        <select id="f-type">
+          <option value="">All</option>
+          <option value="bug">bug</option>
+          <option value="feature">feature</option>
+          <option value="task">task</option>
+          <option value="chore">chore</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-feature">Feature</label>
+        <select id="f-feature"></select>
+      </div>
+      <div class="field grow">
+        <label for="f-search">Search</label>
+        <input id="f-search" type="search" placeholder="Search subject or name…" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button id="btn-refresh">↻ Refresh</button>
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button id="btn-run" class="run" disabled>▶ Run selected (0)</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="selcol"><input type="checkbox" id="sel-all" title="Select all visible tasks"></th>
+            <th style="width:42%">Task</th>
+            <th id="th-project" style="width:14%">Project</th>
+            <th style="width:14%">Feature</th>
+            <th style="width:9%">Priority</th>
+            <th style="width:13%">Status</th>
+            <th style="width:8%">Type</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty-state hidden">
+        <div class="big">No tasks match the current filters</div>
+        <div>Try clearing some filters or refreshing.</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Drawer -->
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <div class="meta">
+        <h2 id="d-title">Task</h2>
+        <div class="submeta" id="d-sub"></div>
+      </div>
+      <button class="iconbtn" id="d-close" title="Close">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="meta-grid">
+        <div class="cell"><div class="k">Status</div><div class="v" id="d-status"></div></div>
+        <div class="cell"><div class="k">Priority</div><div class="v" id="d-prio"></div></div>
+      </div>
+
+      <div class="form-row">
+        <label for="d-subject">Subject</label>
+        <input id="d-subject" type="text">
+      </div>
+
+      <div class="form-2col">
+        <div class="form-row">
+          <label for="d-type">Type</label>
+          <select id="d-type">
+            <option value="bug">bug</option>
+            <option value="feature">feature</option>
+            <option value="task">task</option>
+            <option value="chore">chore</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="d-feature">Feature</label>
+          <input id="d-feature" type="text" placeholder="(none)">
+        </div>
+      </div>
+
+      <div class="form-row" id="d-deps-row">
+        <label>Depends on</label>
+        <div class="deps" id="d-deps"></div>
+      </div>
+
+      <div class="form-row">
+        <label for="d-content">Content</label>
+        <textarea id="d-content" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <div class="drawer-foot">
+      <div class="err" id="d-err"></div>
+      <button id="d-cancel">Close</button>
+      <button class="primary" id="d-save">Save</button>
+    </div>
+  </aside>
+
+  <div id="toasts"></div>
+
+  <!-- Run confirm modal -->
+  <div class="modal-scrim" id="run-modal">
+    <div class="modal">
+      <h3>Run selected tasks with Claude Code</h3>
+      <p>Launches a single <span class="mono">claude</span> session (<span class="mono">/goal</span>) to implement the selected tasks. They will be marked <b>in&nbsp;progress</b> immediately.</p>
+      <div class="tasklist" id="run-tasklist"></div>
+      <div class="form-row">
+        <label for="run-perm">Permission mode</label>
+        <select id="run-perm">
+          <option value="bypassPermissions">bypassPermissions — fully unattended (no prompts)</option>
+          <option value="acceptEdits">acceptEdits — auto-apply edits, prompt for the rest</option>
+          <option value="plan">plan — read-only, no edits</option>
+          <option value="default">default — prompt as usual</option>
+        </select>
+      </div>
+      <div class="warn" id="run-warn"></div>
+      <div class="modal-actions">
+        <button id="run-cancel">Cancel</button>
+        <button id="run-go" class="run">▶ Launch run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live run console -->
+  <div class="run-console" id="run-console">
+    <div class="run-head" id="run-head">
+      <span id="run-stat" class="stat"><span class="pulse"></span> running</span>
+      <span id="run-title" class="run-title"></span>
+      <span class="spacer"></span>
+      <button id="run-resume" title="Copy 'claude --resume <id>' to clipboard">⧉ resume cmd</button>
+      <button id="run-min" class="iconbtn" title="Minimize">▁</button>
+      <button id="run-close" class="iconbtn" title="Close (run keeps running)">×</button>
+    </div>
+    <div class="run-meta" id="run-meta"></div>
+    <div class="run-events" id="run-events"></div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Constants ----------
+  var STATUS_COLORS = {
+    ready: "var(--st-ready)",
+    in_progress: "var(--st-in_progress)",
+    blocked: "var(--st-blocked)",
+    completed: "var(--st-completed)"
+  };
+  var STATUS_LABELS = {
+    ready: "ready",
+    in_progress: "in progress",
+    blocked: "blocked",
+    completed: "completed"
+  };
+  var PRIO_COLORS = ["var(--p0)", "var(--p1)", "var(--p2)", "var(--p3)", "var(--p4)"];
+
+  // The raw 'status' field accepts: pending | in_progress | completed.
+  // Inline status select edits the raw status; computed_status drives the badge color.
+  var RAW_STATUS_OPTIONS = [
+    { value: "pending", label: "pending" },
+    { value: "in_progress", label: "in progress" },
+    { value: "completed", label: "completed" }
+  ];
+
+  // ---------- State ----------
+  var state = {
+    currentProject: "",
+    projects: [],
+    tasks: [],          // in-memory source of truth
+    byId: {},           // id -> task ref
+    selected: {},       // id -> true (checkbox selection)
+    runs: {},           // sessionId -> run meta (from /api/runs)
+    activeRun: null,    // session id of the run shown in the console
+    consoleMin: false,  // console minimized?
+    timer: null         // shared poll interval (runs list + active console)
+  };
+
+  // ---------- DOM refs ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var els = {
+    summary: $("summary"),
+    banner: $("banner"),
+    fProject: $("f-project"),
+    fStatus: $("f-status"),
+    fPriority: $("f-priority"),
+    fType: $("f-type"),
+    fFeature: $("f-feature"),
+    fSearch: $("f-search"),
+    refresh: $("btn-refresh"),
+    btnRun: $("btn-run"),
+    selAll: $("sel-all"),
+    rows: $("rows"),
+    empty: $("empty"),
+    thProject: $("th-project"),
+    runModal: $("run-modal"),
+    runTasklist: $("run-tasklist"),
+    runPerm: $("run-perm"),
+    runWarn: $("run-warn"),
+    runCancel: $("run-cancel"),
+    runGo: $("run-go"),
+    runConsole: $("run-console"),
+    runHead: $("run-head"),
+    runStat: $("run-stat"),
+    runTitle: $("run-title"),
+    runMeta: $("run-meta"),
+    runEvents: $("run-events"),
+    runClose: $("run-close"),
+    runMin: $("run-min"),
+    runResume: $("run-resume"),
+    btnRuns: $("btn-runs"),
+    runsBadge: $("runs-badge"),
+    runsTray: $("runs-tray"),
+    runsList: $("runs-list"),
+    scrim: $("scrim"),
+    drawer: $("drawer"),
+    dTitle: $("d-title"),
+    dSub: $("d-sub"),
+    dStatus: $("d-status"),
+    dPrio: $("d-prio"),
+    dSubject: $("d-subject"),
+    dType: $("d-type"),
+    dFeature: $("d-feature"),
+    dDepsRow: $("d-deps-row"),
+    dDeps: $("d-deps"),
+    dContent: $("d-content"),
+    dErr: $("d-err"),
+    dClose: $("d-close"),
+    dCancel: $("d-cancel"),
+    dSave: $("d-save"),
+    toasts: $("toasts")
+  };
+
+  var openTaskId = null; // task currently shown in drawer
+
+  // ---------- Utilities ----------
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function toast(msg, kind) {
+    var t = document.createElement("div");
+    t.className = "toast" + (kind ? " " + kind : "");
+    t.textContent = msg;
+    els.toasts.appendChild(t);
+    setTimeout(function () {
+      t.style.transition = "opacity .25s";
+      t.style.opacity = "0";
+      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260);
+    }, kind === "error" ? 6000 : 3200);
+  }
+
+  function showBanner(msg) {
+    els.banner.innerHTML = esc(msg) + ' <button id="banner-retry">Retry</button>';
+    els.banner.classList.add("show");
+    var b = $("banner-retry");
+    if (b) b.addEventListener("click", loadState);
+  }
+  function hideBanner() { els.banner.classList.remove("show"); els.banner.innerHTML = ""; }
+
+  function priorityLabel(p) {
+    var n = (typeof p === "number") ? p : 4;
+    if (n < 0) n = 0; if (n > 4) n = 4;
+    return "P" + n;
+  }
+  function clampPrio(p) {
+    var n = (typeof p === "number") ? p : 4;
+    if (n < 0) n = 0; if (n > 4) n = 4;
+    return n;
+  }
+
+  // ---------- API ----------
+  function loadState() {
+    els.refresh.disabled = true;
+    fetch("/api/state", { headers: { "Accept": "application/json" } })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        hideBanner();
+        ingestState(data);
+        render();
+      })
+      .catch(function (err) {
+        showBanner("Failed to load tasks from /api/state: " + err.message);
+      })
+      .finally(function () { els.refresh.disabled = false; });
+  }
+
+  function ingestState(data) {
+    state.currentProject = data.currentProject || "";
+    state.projects = Array.isArray(data.projects) ? data.projects : [];
+    state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    state.byId = {};
+    state.tasks.forEach(function (t) { state.byId[t.id] = t; });
+
+    // Drop selections for tasks that no longer exist.
+    Object.keys(state.selected).forEach(function (id) {
+      if (!state.byId[id]) delete state.selected[id];
+    });
+
+    rebuildProjectFilter();
+    rebuildFeatureFilter();
+    renderSummary();
+    updateRunButton();
+  }
+
+  // PATCH a subset of fields. Resolves to the updated task, or rejects with an
+  // Error whose .message is the server-provided message when available.
+  function patchTask(task, fields) {
+    var url = "/api/tasks/" + encodeURIComponent(task.project) + "/" + encodeURIComponent(task.id);
+    return fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(fields)
+    }).then(function (r) {
+      return r.text().then(function (txt) {
+        var body = null;
+        try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = null; }
+        if (!r.ok) {
+          var msg = (body && body.error && body.error.message)
+            ? body.error.message
+            : ("Update failed (HTTP " + r.status + ")");
+          var e2 = new Error(msg);
+          e2.code = body && body.error && body.error.code;
+          throw e2;
+        }
+        return body; // updated task object
+      });
+    });
+  }
+
+  // Replace a task in memory + indexes, return the stored ref.
+  function applyUpdatedTask(updated) {
+    if (!updated || !updated.id) return null;
+    var idx = -1;
+    for (var i = 0; i < state.tasks.length; i++) {
+      if (state.tasks[i].id === updated.id) { idx = i; break; }
+    }
+    if (idx >= 0) state.tasks[idx] = updated; else state.tasks.push(updated);
+    state.byId[updated.id] = updated;
+    return updated;
+  }
+
+  // ---------- Filter population ----------
+  function rebuildProjectFilter() {
+    var prev = els.fProject.value;
+    var hadOptions = els.fProject.options.length > 0;
+    var html = '<option value="">All</option>';
+    state.projects.forEach(function (p) {
+      html += '<option value="' + esc(p.name) + '">' + esc(p.name) + "</option>";
+    });
+    els.fProject.innerHTML = html;
+
+    var names = state.projects.map(function (p) { return p.name; });
+    if (hadOptions && prev && names.indexOf(prev) >= 0) {
+      els.fProject.value = prev;            // preserve user's selection across refresh
+    } else if (state.currentProject && names.indexOf(state.currentProject) >= 0) {
+      els.fProject.value = state.currentProject; // default to current project
+    } else {
+      els.fProject.value = "";              // default to All
+    }
+  }
+
+  function rebuildFeatureFilter() {
+    var prev = els.fFeature.value;
+    var feats = {};
+    state.tasks.forEach(function (t) {
+      if (t.feature) feats[t.feature] = true;
+    });
+    var list = Object.keys(feats).sort();
+    var html = '<option value="">All</option>';
+    list.forEach(function (f) {
+      html += '<option value="' + esc(f) + '">' + esc(f) + "</option>";
+    });
+    els.fFeature.innerHTML = html;
+    if (prev && list.indexOf(prev) >= 0) els.fFeature.value = prev;
+    else els.fFeature.value = "";
+  }
+
+  // ---------- Summary ----------
+  function renderSummary() {
+    var proj = els.fProject ? els.fProject.value : "";
+    var agg = { total: 0, ready: 0, blocked: 0, in_progress: 0, completed: 0 };
+
+    state.projects.forEach(function (p) {
+      if (proj && p.name !== proj) return;
+      var c = p.counts || {};
+      agg.total += c.total || 0;
+      agg.ready += c.ready || 0;
+      agg.blocked += c.blocked || 0;
+      agg.in_progress += c.in_progress || 0;
+      agg.completed += c.completed || 0;
+    });
+
+    var html = '<span class="chip"><b>' + agg.total + '</b> total</span>';
+    html += chipStat("ready", agg.ready);
+    html += chipStat("in_progress", agg.in_progress);
+    html += chipStat("blocked", agg.blocked);
+    html += chipStat("completed", agg.completed);
+    els.summary.innerHTML = html;
+  }
+  function chipStat(key, n) {
+    return '<span class="chip"><span class="dot" style="background:' + STATUS_COLORS[key] + '"></span>'
+      + '<b>' + n + '</b> ' + STATUS_LABELS[key] + '</span>';
+  }
+
+  // ---------- Filtering ----------
+  function currentFilters() {
+    return {
+      project: els.fProject.value,
+      status: els.fStatus.value,
+      priority: els.fPriority.value,
+      type: els.fType.value,
+      feature: els.fFeature.value,
+      search: els.fSearch.value.trim().toLowerCase()
+    };
+  }
+
+  function matches(t, f) {
+    if (f.project && t.project !== f.project) return false;
+    if (f.status && t.computed_status !== f.status) return false;
+    if (f.priority !== "" && String(t.priority) !== f.priority) return false;
+    if (f.type && t.type !== f.type) return false;
+    if (f.feature && (t.feature || "") !== f.feature) return false;
+    if (f.search) {
+      var hay = ((t.subject || "") + " " + (t.name || "")).toLowerCase();
+      if (hay.indexOf(f.search) === -1) return false;
+    }
+    return true;
+  }
+
+  // ---------- Rendering the table ----------
+  function render() {
+    var f = currentFilters();
+    var showProjectCol = (f.project === "");
+    els.thProject.classList.toggle("hidden", !showProjectCol);
+
+    var visible = state.tasks.filter(function (t) { return matches(t, f); });
+
+    // Sort: priority asc, then computed_status order, then subject.
+    var statusOrder = { in_progress: 0, ready: 1, blocked: 2, completed: 3 };
+    visible.sort(function (a, b) {
+      var pa = (typeof a.priority === "number") ? a.priority : 99;
+      var pb = (typeof b.priority === "number") ? b.priority : 99;
+      if (pa !== pb) return pa - pb;
+      var sa = statusOrder[a.computed_status] != null ? statusOrder[a.computed_status] : 9;
+      var sb = statusOrder[b.computed_status] != null ? statusOrder[b.computed_status] : 9;
+      if (sa !== sb) return sa - sb;
+      return (a.subject || a.name || "").localeCompare(b.subject || b.name || "");
+    });
+
+    state.visibleIds = visible.map(function (t) { return t.id; });
+
+    els.rows.innerHTML = "";
+    if (visible.length === 0) {
+      els.empty.classList.remove("hidden");
+    } else {
+      els.empty.classList.add("hidden");
+      visible.forEach(function (t) {
+        els.rows.appendChild(buildRow(t, showProjectCol));
+      });
+    }
+    renderSummary();
+    updateSelAll();
+  }
+
+  // ---------- Selection ----------
+  function selectedIds() {
+    return Object.keys(state.selected).filter(function (id) { return state.byId[id]; });
+  }
+
+  function updateRunButton() {
+    var n = selectedIds().length;
+    els.btnRun.textContent = "▶ Run selected (" + n + ")";
+    els.btnRun.disabled = n === 0;
+  }
+
+  // Reflect how many of the currently-visible rows are selected on the
+  // header select-all checkbox (checked / indeterminate / unchecked).
+  function updateSelAll() {
+    var vis = state.visibleIds || [];
+    if (vis.length === 0) {
+      els.selAll.checked = false;
+      els.selAll.indeterminate = false;
+      return;
+    }
+    var sel = 0;
+    vis.forEach(function (id) { if (state.selected[id]) sel++; });
+    els.selAll.checked = sel === vis.length;
+    els.selAll.indeterminate = sel > 0 && sel < vis.length;
+  }
+
+  function toggleSelectAll() {
+    var vis = state.visibleIds || [];
+    var selectAll = !(vis.length > 0 && vis.every(function (id) { return state.selected[id]; }));
+    vis.forEach(function (id) {
+      if (selectAll) state.selected[id] = true;
+      else delete state.selected[id];
+    });
+    render();          // re-render rows so checkboxes reflect the new state
+    updateRunButton();
+  }
+
+  function buildRow(t, showProjectCol) {
+    var tr = document.createElement("tr");
+    tr.dataset.id = t.id;
+
+    // Selection checkbox cell
+    var tdSel = document.createElement("td");
+    tdSel.className = "selcol";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "rowsel";
+    cb.checked = !!state.selected[t.id];
+    cb.addEventListener("click", function (ev) { ev.stopPropagation(); });
+    cb.addEventListener("change", function () {
+      if (cb.checked) state.selected[t.id] = true;
+      else delete state.selected[t.id];
+      updateRunButton();
+      updateSelAll();
+    });
+    tdSel.appendChild(cb);
+    tr.appendChild(tdSel);
+
+    // Task cell
+    var tdTask = document.createElement("td");
+    var subj = t.subject && t.subject.trim() ? t.subject : t.name;
+    tdTask.innerHTML = '<div class="subject">' + esc(subj) + "</div>"
+      + '<div class="tname">' + esc(t.name) + "</div>";
+    tr.appendChild(tdTask);
+
+    // Project cell
+    var tdProj = document.createElement("td");
+    tdProj.className = "proj-cell";
+    if (!showProjectCol) tdProj.classList.add("hidden");
+    tdProj.textContent = t.project || "";
+    tr.appendChild(tdProj);
+
+    // Feature cell
+    var tdFeat = document.createElement("td");
+    tdFeat.className = "feat-cell";
+    tdFeat.innerHTML = t.feature ? esc(t.feature) : '<span class="empty">—</span>';
+    tr.appendChild(tdFeat);
+
+    // Priority inline select
+    var tdPrio = document.createElement("td");
+    tdPrio.appendChild(buildPrioritySelect(t));
+    tr.appendChild(tdPrio);
+
+    // Status inline select
+    var tdStatus = document.createElement("td");
+    tdStatus.appendChild(buildStatusSelect(t));
+    tr.appendChild(tdStatus);
+
+    // Type cell
+    var tdType = document.createElement("td");
+    tdType.innerHTML = '<span class="type-tag">' + esc(t.type || "") + "</span>";
+    tr.appendChild(tdType);
+
+    // Row click -> drawer (ignore clicks on inline selects + the checkbox cell)
+    tr.addEventListener("click", function (ev) {
+      if (ev.target.closest("select") || ev.target.closest(".selcol")) return;
+      openDrawer(t.id);
+    });
+
+    return tr;
+  }
+
+  function styleStatusSelect(sel, computed) {
+    var c = STATUS_COLORS[computed] || "var(--fg-faint)";
+    sel.style.color = c;
+    sel.style.borderColor = c;
+    sel.style.background = "transparent";
+  }
+  function stylePrioritySelect(sel, p) {
+    var c = PRIO_COLORS[clampPrio(p)];
+    sel.style.color = c;
+    sel.style.borderColor = c;
+    sel.style.background = "transparent";
+  }
+
+  function buildStatusSelect(t) {
+    var sel = document.createElement("select");
+    sel.className = "inline";
+    sel.title = "computed: " + (t.computed_status || "");
+    RAW_STATUS_OPTIONS.forEach(function (o) {
+      var opt = document.createElement("option");
+      opt.value = o.value;
+      opt.textContent = o.label;
+      sel.appendChild(opt);
+    });
+    sel.value = t.status;
+    sel.dataset.prev = t.status;
+    styleStatusSelect(sel, t.computed_status);
+
+    sel.addEventListener("change", function () {
+      var newVal = sel.value;
+      var prev = sel.dataset.prev;
+      sel.disabled = true;
+      patchTask(t, { status: newVal })
+        .then(function (updated) {
+          applyUpdatedTask(updated);
+          if (openTaskId === updated.id) fillDrawer(updated);
+          render(); // reflect recomputed status & re-sort
+          toast("Status updated to " + updated.status + ".", "ok");
+        })
+        .catch(function (err) {
+          sel.value = prev;        // revert
+          styleStatusSelect(sel, t.computed_status);
+          toast(err.message, "error");
+        })
+        .finally(function () { sel.disabled = false; });
+    });
+    return sel;
+  }
+
+  function buildPrioritySelect(t) {
+    var sel = document.createElement("select");
+    sel.className = "inline";
+    for (var i = 0; i <= 4; i++) {
+      var opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = "P" + i;
+      sel.appendChild(opt);
+    }
+    var cur = clampPrio(t.priority);
+    sel.value = String(cur);
+    sel.dataset.prev = String(cur);
+    stylePrioritySelect(sel, cur);
+
+    sel.addEventListener("change", function () {
+      var newVal = parseInt(sel.value, 10);
+      var prev = sel.dataset.prev;
+      sel.disabled = true;
+      patchTask(t, { priority: newVal })
+        .then(function (updated) {
+          applyUpdatedTask(updated);
+          if (openTaskId === updated.id) fillDrawer(updated);
+          render();
+          toast("Priority updated to P" + updated.priority + ".", "ok");
+        })
+        .catch(function (err) {
+          sel.value = prev;
+          stylePrioritySelect(sel, t.priority);
+          toast(err.message, "error");
+        })
+        .finally(function () { sel.disabled = false; });
+    });
+    return sel;
+  }
+
+  // ---------- Drawer ----------
+  function badgeHTML(label, color) {
+    return '<span class="badge" style="color:' + color + ';border-color:' + color
+      + ';background:transparent"><span class="dot" style="background:' + color
+      + '"></span>' + esc(label) + "</span>";
+  }
+
+  function fillDrawer(t) {
+    var subj = t.subject && t.subject.trim() ? t.subject : t.name;
+    els.dTitle.textContent = subj;
+    els.dSub.textContent = t.name + "  ·  " + t.id + "  ·  " + (t.project || "");
+
+    var cs = t.computed_status || "";
+    els.dStatus.innerHTML = badgeHTML(STATUS_LABELS[cs] || cs, STATUS_COLORS[cs] || "var(--fg-faint)")
+      + ' <span class="type-tag" style="margin-left:6px">raw: ' + esc(t.status) + "</span>";
+    var p = clampPrio(t.priority);
+    els.dPrio.innerHTML = badgeHTML(priorityLabel(t.priority), PRIO_COLORS[p]);
+
+    els.dSubject.value = t.subject || "";
+    els.dType.value = t.type || "task";
+    els.dFeature.value = t.feature || "";
+    els.dContent.value = t.content || "";
+
+    // dependencies
+    var deps = Array.isArray(t.depends_on) ? t.depends_on : [];
+    var pending = Array.isArray(t.pending_dependencies) ? t.pending_dependencies : [];
+    if (deps.length === 0) {
+      els.dDepsRow.classList.add("hidden");
+    } else {
+      els.dDepsRow.classList.remove("hidden");
+      els.dDeps.innerHTML = deps.map(function (d) {
+        var isPending = pending.indexOf(d) >= 0;
+        return '<span class="dep' + (isPending ? " pending" : "") + '">' + esc(d)
+          + (isPending ? " ⏳" : " ✓") + "</span>";
+      }).join("");
+    }
+    els.dErr.textContent = "";
+  }
+
+  function openDrawer(id) {
+    var t = state.byId[id];
+    if (!t) return;
+    openTaskId = id;
+    fillDrawer(t);
+    els.scrim.classList.add("open");
+    els.drawer.classList.add("open");
+    els.drawer.setAttribute("aria-hidden", "false");
+  }
+
+  function closeDrawer() {
+    openTaskId = null;
+    els.scrim.classList.remove("open");
+    els.drawer.classList.remove("open");
+    els.drawer.setAttribute("aria-hidden", "true");
+  }
+
+  function saveDrawer() {
+    if (!openTaskId) return;
+    var t = state.byId[openTaskId];
+    if (!t) return;
+
+    var fields = {
+      subject: els.dSubject.value,
+      type: els.dType.value,
+      feature: els.dFeature.value,
+      content: els.dContent.value
+    };
+
+    els.dSave.disabled = true;
+    els.dCancel.disabled = true;
+    els.dErr.textContent = "";
+    patchTask(t, fields)
+      .then(function (updated) {
+        applyUpdatedTask(updated);
+        fillDrawer(updated);
+        rebuildFeatureFilter(); // feature value may be new/removed
+        render();
+        toast("Task saved.", "ok");
+        closeDrawer();
+      })
+      .catch(function (err) {
+        els.dErr.textContent = err.message;
+        toast(err.message, "error");
+      })
+      .finally(function () {
+        els.dSave.disabled = false;
+        els.dCancel.disabled = false;
+      });
+  }
+
+  // ---------- Batch run ----------
+  var PERM_WARN = {
+    bypassPermissions: { cls: "danger", html: "⚠ <b>Unattended:</b> Claude will edit files and run commands with <b>no confirmation prompts</b>. Only launch tasks you trust on this machine." },
+    acceptEdits: { cls: "danger", html: "⚠ Claude will <b>auto-apply file edits</b> but still prompt for other sensitive actions." },
+    plan: { cls: "soft", html: "Read-only: Claude will plan the work but won't make any edits. Re-run with another mode to apply changes." },
+    "default": { cls: "soft", html: "Claude will prompt for permissions as usual — the run may block waiting on input it can't show here." }
+  };
+
+  function updateRunWarn() {
+    var w = PERM_WARN[els.runPerm.value] || PERM_WARN["default"];
+    els.runWarn.className = "warn " + w.cls;
+    els.runWarn.innerHTML = w.html;
+  }
+
+  function openRunModal() {
+    var ids = selectedIds();
+    if (ids.length === 0) return;
+    els.runTasklist.innerHTML = ids.map(function (id) {
+      var t = state.byId[id];
+      var subj = (t.subject && t.subject.trim()) ? t.subject : t.name;
+      return '<div><span class="mono">' + esc((t.project || "") + "/" + t.name) + "</span> — " + esc(subj) + "</div>";
+    }).join("");
+    updateRunWarn();
+    els.runModal.classList.add("open");
+  }
+  function closeRunModal() { els.runModal.classList.remove("open"); }
+
+  function launchRun() {
+    var ids = selectedIds();
+    if (ids.length === 0) return;
+    var tasks = ids.map(function (id) {
+      var t = state.byId[id];
+      return { project: t.project, id: t.id };
+    });
+
+    els.runGo.disabled = true;
+    els.runCancel.disabled = true;
+    fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ tasks: tasks, permissionMode: els.runPerm.value })
+    }).then(function (r) {
+      return r.text().then(function (txt) {
+        var body = null;
+        try { body = txt ? JSON.parse(txt) : null; } catch (e) { body = null; }
+        if (!r.ok) {
+          var msg = (body && body.error && body.error.message) ? body.error.message : ("Run failed (HTTP " + r.status + ")");
+          throw new Error(msg);
+        }
+        return body;
+      });
+    }).then(function (info) {
+      closeRunModal();
+      state.selected = {};
+      updateRunButton();
+      state.runs[info.sessionId] = info;   // cache meta for the sessions tray
+      toast("Launched run " + info.sessionId.slice(0, 8) + " for " + tasks.length + " task(s).", "ok");
+      openRunConsole(info.sessionId);
+      ensurePolling();
+      renderRunsTray();
+      loadState(); // reflect in_progress status flips
+    }).catch(function (err) {
+      toast(err.message, "error");
+    }).finally(function () {
+      els.runGo.disabled = false;
+      els.runCancel.disabled = false;
+    });
+  }
+
+  // ----- console: a single panel pointed at one run at a time -----
+  function openRunConsole(sessionId) {
+    var info = state.runs[sessionId];
+    if (!info) return;
+    state.activeRun = sessionId;
+    state.consoleMin = false;
+    els.runConsole.classList.remove("min");
+    els.runMin.textContent = "▁";
+    els.runTitle.textContent = sessionId.slice(0, 8) + " · " + ((info.tasks || []).length) + " task(s)";
+    els.runMeta.innerHTML =
+      "<div><b>session</b> " + esc(info.sessionId) + "</div>" +
+      "<div><b>mode</b> " + esc(info.permissionMode) + "  ·  <b>cwd</b> " + esc(info.cwd) + "</div>" +
+      "<div><b>transcript</b> " + esc(info.transcriptPath) + "</div>";
+    els.runResume.dataset.cmd = info.resumeHint || ("claude --resume " + sessionId);
+    setRunStatus(info.done, info.exitError);
+    els.runEvents.innerHTML = '<div class="run-empty">Loading transcript…</div>';
+    els.runConsole.classList.add("open");
+    refreshActiveEvents();   // immediate first fetch
+    renderRunsTray();
+  }
+
+  function closeRunConsole() {
+    state.activeRun = null;
+    els.runConsole.classList.remove("open", "min");
+    renderRunsTray();        // clear the "active" highlight in the tray
+  }
+
+  function toggleMinimize() {
+    state.consoleMin = !state.consoleMin;
+    els.runConsole.classList.toggle("min", state.consoleMin);
+    els.runMin.textContent = state.consoleMin ? "▢" : "▁";
+  }
+
+  function setRunStatus(done, exitError) {
+    if (!done) {
+      els.runStat.innerHTML = '<span class="pulse"></span> running';
+    } else if (exitError) {
+      els.runStat.innerHTML = '<span class="dot-err"></span> exited';
+    } else {
+      els.runStat.innerHTML = '<span class="dot-done"></span> finished';
+    }
+  }
+
+  function renderRunEvents(events) {
+    var box = els.runEvents;
+    var atBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 40;
+    if (!events || events.length === 0) {
+      box.innerHTML = '<div class="run-empty">No transcript output yet…</div>';
+      return;
+    }
+    box.innerHTML = events.map(function (ev) {
+      var who = ev.kind === "summary" ? "summary" : (ev.role || ev.kind || "");
+      return '<div class="run-ev ' + esc(ev.kind || "") + '"><span class="who">' + esc(who) + "</span>" + esc(ev.text || "") + "</div>";
+    }).join("");
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function refreshActiveEvents() {
+    var id = state.activeRun;
+    if (!id) return;
+    fetch("/api/run/" + encodeURIComponent(id), { headers: { "Accept": "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (data) {
+        if (state.activeRun !== id) return; // closed/switched mid-flight
+        state.runs[id] = mergeRun(state.runs[id], data);
+        renderRunEvents(data.events || []);
+        setRunStatus(data.done, data.exitError);
+        els.runTitle.textContent = id.slice(0, 8) + " · " + ((data.tasks || []).length) + " task(s)";
+      })
+      .catch(function () { /* transient */ });
+  }
+
+  // ----- sessions tray + shared poller -----
+  function mergeRun(prev, next) {
+    var out = prev || {};
+    Object.keys(next).forEach(function (k) {
+      if (k === "events") return;   // keep cached tray data light
+      out[k] = next[k];
+    });
+    return out;
+  }
+
+  function runsArray() {
+    return Object.keys(state.runs)
+      .map(function (id) { return state.runs[id]; })
+      .sort(function (a, b) { return (b.startedAt || "").localeCompare(a.startedAt || ""); });
+  }
+  function runningCount() {
+    return runsArray().filter(function (r) { return !r.done; }).length;
+  }
+
+  function updateRunsBadge() {
+    var runs = runsArray();
+    var active = runningCount();
+    els.btnRuns.classList.toggle("hidden", runs.length === 0);
+    els.runsBadge.textContent = active > 0 ? String(active) : String(runs.length);
+    els.runsBadge.classList.toggle("idle", active === 0);
+  }
+
+  function renderRunsTray() {
+    var runs = runsArray();
+    if (runs.length === 0) {
+      els.runsList.innerHTML = '<div class="runs-empty">No runs yet.</div>';
+    } else {
+      els.runsList.innerHTML = runs.map(function (r) {
+        var dot = r.done ? (r.exitError ? "dot-err" : "dot-done") : "pulse";
+        var stat = r.done ? (r.exitError ? "exited" : "done") : "running";
+        var names = (r.tasks || []).map(function (t) { return t.name; }).join(", ");
+        var n = (r.tasks || []).length;
+        var act = (r.sessionId === state.activeRun) ? " active" : "";
+        return '<div class="run-item' + act + '" data-id="' + esc(r.sessionId) + '">' +
+          '<span class="' + dot + '"></span>' +
+          '<div class="ri-main"><div class="ri-title">' + esc(r.sessionId.slice(0, 8)) + " · " + n + " task" + (n === 1 ? "" : "s") + "</div>" +
+          '<div class="ri-sub">' + esc(names || "—") + "</div></div>" +
+          '<span class="ri-stat">' + stat + "</span></div>";
+      }).join("");
+      Array.prototype.forEach.call(els.runsList.querySelectorAll(".run-item"), function (el) {
+        el.addEventListener("click", function () {
+          openRunConsole(el.dataset.id);
+          els.runsTray.classList.add("hidden");
+        });
+      });
+    }
+    updateRunsBadge();
+  }
+
+  function toggleRunsTray() {
+    els.runsTray.classList.toggle("hidden");
+    if (!els.runsTray.classList.contains("hidden")) renderRunsTray();
+  }
+
+  function refreshRunsList() {
+    return fetch("/api/runs", { headers: { "Accept": "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (data) {
+        var arr = (data && data.runs) || [];
+        var transitioned = false;
+        arr.forEach(function (r) {
+          var prev = state.runs[r.sessionId];
+          if (prev && !prev.done && r.done) {
+            transitioned = true;
+            toast("Run " + r.sessionId.slice(0, 8) + (r.exitError ? " exited." : " finished."), r.exitError ? "error" : "ok");
+          }
+          state.runs[r.sessionId] = mergeRun(prev, r);
+        });
+        renderRunsTray();
+        if (transitioned) {
+          if (state.activeRun) refreshActiveEvents(); // grab the final output
+          loadState();                                // task statuses may have changed
+        }
+        if (runningCount() === 0) stopPolling();
+      })
+      .catch(function () { /* transient */ });
+  }
+
+  function tick() {
+    refreshRunsList();
+    if (state.activeRun) refreshActiveEvents();
+  }
+  function ensurePolling() {
+    if (state.timer) return;
+    state.timer = setInterval(tick, 1500);
+  }
+  function stopPolling() {
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  }
+
+  function copyResume() {
+    var cmd = els.runResume.dataset.cmd || "";
+    if (!cmd) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(
+        function () { toast("Copied: " + cmd, "ok"); },
+        function () { toast(cmd, "ok"); }
+      );
+    } else {
+      toast(cmd, "ok");
+    }
+  }
+
+  // ---------- Events ----------
+  function onFilterChange() {
+    // project change also affects summary aggregation & project column
+    render();
+  }
+
+  els.fProject.addEventListener("change", onFilterChange);
+  els.fStatus.addEventListener("change", onFilterChange);
+  els.fPriority.addEventListener("change", onFilterChange);
+  els.fType.addEventListener("change", onFilterChange);
+  els.fFeature.addEventListener("change", onFilterChange);
+  els.fSearch.addEventListener("input", debounce(onFilterChange, 120));
+  els.refresh.addEventListener("click", loadState);
+
+  els.selAll.addEventListener("change", toggleSelectAll);
+  els.btnRun.addEventListener("click", openRunModal);
+  els.runCancel.addEventListener("click", closeRunModal);
+  els.runPerm.addEventListener("change", updateRunWarn);
+  els.runGo.addEventListener("click", launchRun);
+  els.runClose.addEventListener("click", closeRunConsole);
+  els.runMin.addEventListener("click", toggleMinimize);
+  els.runResume.addEventListener("click", copyResume);
+
+  els.btnRuns.addEventListener("click", function (e) { e.stopPropagation(); toggleRunsTray(); });
+  // Click the header of a minimized console to restore it.
+  els.runHead.addEventListener("click", function (e) {
+    if (state.consoleMin && !e.target.closest("button")) toggleMinimize();
+  });
+  // Click anywhere outside the sessions tray closes it.
+  document.addEventListener("click", function (e) {
+    if (els.runsTray.classList.contains("hidden")) return;
+    if (e.target.closest("#runs-tray") || e.target.closest("#btn-runs")) return;
+    els.runsTray.classList.add("hidden");
+  });
+
+  els.dClose.addEventListener("click", closeDrawer);
+  els.dCancel.addEventListener("click", closeDrawer);
+  els.scrim.addEventListener("click", closeDrawer);
+  els.dSave.addEventListener("click", saveDrawer);
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (els.runModal.classList.contains("open")) closeRunModal();
+    else if (!els.runsTray.classList.contains("hidden")) els.runsTray.classList.add("hidden");
+    else if (els.drawer.classList.contains("open")) closeDrawer();
+  });
+
+  function debounce(fn, ms) {
+    var h;
+    return function () {
+      clearTimeout(h);
+      h = setTimeout(fn, ms);
+    };
+  }
+
+  // ---------- Boot ----------
+  loadState();
+  refreshRunsList().then(function () { if (runningCount() > 0) ensurePolling(); });
+})();
+</script>
+</body>
+</html>

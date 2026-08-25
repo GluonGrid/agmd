@@ -1,0 +1,6 @@
+tests/tmp/
+dist/
+node_modules/
+.vite/
+.claude/settings.local.json
+.claude/worktrees/
