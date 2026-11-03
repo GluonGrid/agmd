@@ -133,10 +133,6 @@ func runTaskEmoji(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err

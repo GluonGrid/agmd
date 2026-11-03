@@ -1362,10 +1362,6 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
@@ -1588,10 +1584,6 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
@@ -1728,10 +1720,6 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
-	}
-
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
 	// Handle "agmd task show --all"
@@ -1891,10 +1879,6 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
@@ -2012,10 +1996,6 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
@@ -2076,10 +2056,6 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
-	}
-
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
 	}
 
 	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
@@ -2361,10 +2337,6 @@ func runTaskAssign(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, taskRef, err := resolveTaskProjectAndRef(args[0])
 	if err != nil {
 		return err
@@ -2422,10 +2394,6 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	if taskUnassignAll {
 		projectName, projectErr := getProjectName()
 		if projectErr != nil {

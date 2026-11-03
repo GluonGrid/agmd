@@ -4,3 +4,4 @@ node_modules/
 .vite/
 .claude/settings.local.json
 .claude/worktrees/
+/agmd
