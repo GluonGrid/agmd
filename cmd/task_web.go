@@ -162,6 +162,11 @@ func loadWebState(reg *registry.Registry, currentProject string) (webStatePayloa
 				Completed:  payload.Counts.Completed,
 			},
 		})
+		for i := range payload.Tasks {
+			if err := attachComments(reg, &payload.Tasks[i]); err != nil {
+				return state, err
+			}
+		}
 		state.Tasks = append(state.Tasks, payload.Tasks...)
 	}
 
@@ -197,6 +202,7 @@ func NewTaskWebHandler(reg *registry.Registry, currentProject string) http.Handl
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/state", h.handleState)
 	mux.HandleFunc("PATCH /api/tasks/{project}/{id}", h.handlePatch)
+	mux.HandleFunc("POST /api/tasks/{project}/{id}/comments", h.handleComment)
 	mux.HandleFunc("POST /api/run", h.handleRun)
 	mux.HandleFunc("GET /api/runs", h.handleRunList)
 	mux.HandleFunc("GET /api/run/{id}", h.handleRunStatus)
@@ -326,7 +332,51 @@ func (h *taskWebHandler) handlePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reload the project so computed_status reflects sibling task states.
+	h.writeTaskItem(w, project, task)
+}
+
+type commentBody struct {
+	Author string `json:"author"`
+	Body   string `json:"body"`
+}
+
+func (h *taskWebHandler) handleComment(w http.ResponseWriter, r *http.Request) {
+	project := r.PathValue("project")
+	id := r.PathValue("id")
+
+	var body commentBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeWebError(w, http.StatusBadRequest, "invalid_input", fmt.Sprintf("invalid JSON body: %v", err))
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	unlock, err := lockProject(h.reg, project)
+	if err != nil {
+		writeWebError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	defer unlock()
+
+	task, err := resolveTaskRef(h.reg, project, id)
+	if err != nil {
+		status, code := webErrorStatus(err)
+		writeWebError(w, status, code, err.Error())
+		return
+	}
+	if _, err := addTaskComment(h.reg, project, task.ID, body.Author, body.Body); err != nil {
+		status, code := webErrorStatus(err)
+		writeWebError(w, status, code, err.Error())
+		return
+	}
+	h.writeTaskItem(w, project, task)
+}
+
+// writeTaskItem responds with the task as the board shows it. It reloads the
+// project so computed_status reflects sibling task states.
+func (h *taskWebHandler) writeTaskItem(w http.ResponseWriter, project string, task *Task) {
 	tasks, err := loadProjectTasks(h.reg, project)
 	if err != nil {
 		writeWebError(w, http.StatusInternalServerError, "internal", err.Error())
@@ -339,6 +389,10 @@ func (h *taskWebHandler) handlePatch(w http.ResponseWriter, r *http.Request) {
 	}
 	taskMap := buildTaskMap(tasks)
 	item := taskToJSONItem(task, taskMap, assignments, true)
+	if err := attachComments(h.reg, &item); err != nil {
+		writeWebError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
 	writeWebJSON(w, http.StatusOK, item)
 }
 
@@ -354,6 +408,8 @@ func webErrorStatus(err error) (int, string) {
 			return http.StatusConflict, "project_mismatch"
 		case "invalid_transition":
 			return http.StatusConflict, "invalid_transition"
+		case "conflict":
+			return http.StatusConflict, "conflict"
 		default:
 			return http.StatusBadRequest, coded.ErrorCode()
 		}

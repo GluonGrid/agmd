@@ -114,6 +114,10 @@ func runTaskNext(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	item := taskToJSONItem(picked, taskMap, assignments, true)
+	if err := attachComments(reg, &item); err != nil {
+		return fmt.Errorf("failed to load comments: %w", err)
+	}
 	if taskJSON {
 		return printJSON(struct {
 			OK      bool         `json:"ok"`
@@ -124,7 +128,7 @@ func runTaskNext(cmd *cobra.Command, args []string) error {
 			OK:      true,
 			Action:  action,
 			Project: projectName,
-			Task:    taskToJSONItem(picked, taskMap, assignments, true),
+			Task:    item,
 		})
 	}
 
@@ -141,6 +145,7 @@ func runTaskNext(cmd *cobra.Command, args []string) error {
 	if picked.Content != "" {
 		fmt.Printf("\n%s\n", picked.Content)
 	}
+	printTaskComments(item.Comments)
 	return nil
 }
 

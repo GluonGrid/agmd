@@ -334,6 +334,19 @@
     color: var(--fg-dim);
   }
   .deps .dep.pending { color: var(--st-blocked); border-color: rgba(249,115,22,.4); }
+  .comments { display: flex; flex-direction: column; gap: 8px; }
+  .comments:empty { display: none; }
+  .comment {
+    background: var(--bg-elev2);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .comment .who { font-size: 11.5px; color: var(--fg-dim); margin-bottom: 4px; }
+  .comment .who b { color: var(--fg); font-weight: 600; }
+  .comment .body { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.5; }
+  .form-row textarea.comment-input { min-height: 64px; font-family: inherit; font-size: 13px; }
+  .comment-actions { display: flex; justify-content: flex-end; }
   .meta-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -632,6 +645,13 @@
         <label for="d-content">Content</label>
         <textarea id="d-content" spellcheck="false"></textarea>
       </div>
+
+      <div class="form-row">
+        <label for="d-comment-new">Comments</label>
+        <div class="comments" id="d-comments"></div>
+        <textarea id="d-comment-new" class="comment-input" placeholder="Add a comment…"></textarea>
+        <div class="comment-actions"><button id="d-comment-add">Add comment</button></div>
+      </div>
     </div>
     <div class="drawer-foot">
       <div class="err" id="d-err"></div>
@@ -767,6 +787,9 @@
     dDepsRow: $("d-deps-row"),
     dDeps: $("d-deps"),
     dContent: $("d-content"),
+    dComments: $("d-comments"),
+    dCommentNew: $("d-comment-new"),
+    dCommentAdd: $("d-comment-add"),
     dErr: $("d-err"),
     dClose: $("d-close"),
     dCancel: $("d-cancel"),
@@ -1232,7 +1255,46 @@
           + (isPending ? " ⏳" : " ✓") + "</span>";
       }).join("");
     }
+    renderComments(t);
     els.dErr.textContent = "";
+  }
+
+  function renderComments(t) {
+    var comments = Array.isArray(t.comments) ? t.comments : [];
+    els.dComments.innerHTML = comments.map(function (c) {
+      var when = c.created_at ? new Date(c.created_at).toLocaleString() : "";
+      return '<div class="comment"><div class="who"><b>' + esc(c.author) + "</b> · " + esc(when)
+        + '</div><div class="body">' + esc(c.body) + "</div></div>";
+    }).join("");
+  }
+
+  function addComment() {
+    if (!openTaskId) return;
+    var t = state.byId[openTaskId];
+    var body = els.dCommentNew.value.trim();
+    if (!t || !body) return;
+    var url = "/api/tasks/" + encodeURIComponent(t.project) + "/" + encodeURIComponent(t.id) + "/comments";
+    els.dCommentAdd.disabled = true;
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ body: body })
+    }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (res) {
+        if (!r.ok) {
+          throw new Error((res && res.error && res.error.message) || ("Comment failed (HTTP " + r.status + ")"));
+        }
+        return res;
+      });
+    }).then(function (updated) {
+      applyUpdatedTask(updated);
+      els.dCommentNew.value = "";
+      if (openTaskId === updated.id) renderComments(updated);
+    }).catch(function (err) {
+      toast(err.message, "error");
+    }).finally(function () {
+      els.dCommentAdd.disabled = false;
+    });
   }
 
   function openDrawer(id) {
@@ -1574,6 +1636,7 @@
   els.dCancel.addEventListener("click", closeDrawer);
   els.scrim.addEventListener("click", closeDrawer);
   els.dSave.addEventListener("click", saveDrawer);
+  els.dCommentAdd.addEventListener("click", addComment);
 
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;

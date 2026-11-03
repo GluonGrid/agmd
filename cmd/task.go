@@ -175,6 +175,7 @@ Subcommands:
   blocked-by  Add a dependency
   unblock     Remove a dependency
   next        Show or atomically claim the next ready task
+  comment     Add a comment (progress note) to a task
   assign      Attach workflow assignment metadata
   unassign    Remove workflow assignment metadata
   web         Launch a local web UI to browse and edit tasks
@@ -553,6 +554,7 @@ type taskJSONItem struct {
 	PendingDependencies []string        `json:"pending_dependencies,omitempty"`
 	Assignment          *taskAssignment `json:"assignment,omitempty"`
 	Content             string          `json:"content,omitempty"`
+	Comments            []taskComment   `json:"comments,omitempty"`
 }
 
 type taskListJSONPayload struct {
@@ -1793,8 +1795,12 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load assignments: %w", err)
 	}
 
+	item := taskToJSONItem(task, taskMap, assignments, true)
+	if err := attachComments(reg, &item); err != nil {
+		return fmt.Errorf("failed to load comments: %w", err)
+	}
 	if taskJSON {
-		return printJSON(taskToJSONItem(task, taskMap, assignments, true))
+		return printJSON(item)
 	}
 
 	fmt.Printf("%s %s\n", dim("subject:"), task.Subject)
@@ -1821,6 +1827,7 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	if task.Content != "" {
 		fmt.Printf("\n%s\n", task.Content)
 	}
+	printTaskComments(item.Comments)
 
 	return nil
 }
@@ -1995,6 +2002,9 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 	if err := dropTaskAssignments(reg, projectName, deletedIDs...); err != nil {
 		return fmt.Errorf("failed to update assignments: %w", err)
 	}
+	if err := removeTaskComments(reg, projectName, deletedIDs...); err != nil {
+		return fmt.Errorf("failed to remove comments: %w", err)
+	}
 
 	if taskJSON {
 		return printJSON(struct {
@@ -2159,6 +2169,9 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 	}
 	if err := dropTaskAssignments(reg, projectName, taskID); err != nil {
 		return fmt.Errorf("failed to update assignments: %w", err)
+	}
+	if err := removeTaskComments(reg, projectName, taskID); err != nil {
+		return fmt.Errorf("failed to remove comments: %w", err)
 	}
 
 	if taskJSON {

@@ -31,7 +31,9 @@ func agmdBinary(t *testing.T) string {
 		agmdBinPath = filepath.Join(dir, "agmd")
 		_, thisFile, _, _ := runtime.Caller(0)
 		root := filepath.Join(filepath.Dir(thisFile), "..", "..")
-		out, err := exec.Command("go", "build", "-o", agmdBinPath, root).CombinedOutput()
+		build := exec.Command("go", "build", "-o", agmdBinPath, ".")
+		build.Dir = root
+		out, err := build.CombinedOutput()
 		if err != nil {
 			agmdBinErr = fmt.Errorf("go build failed: %v\n%s", err, out)
 		}

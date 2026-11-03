@@ -9,7 +9,7 @@ concurrent processes.
 ## Concurrency Rules
 
 - Every read-modify-write of a project's files (task `.md` files,
-  `assignments.json`, `project.json`) must hold `lockProject(reg, project)`
+  `assignments.json`, `project.json`, `comments/*.json`) must hold `lockProject(reg, project)`
   (`cmd/task_lock.go`). Never hold it while waiting for user input.
 - Write files with `writeFileAtomic` (replace) or `writeFileExclusive`
   (create-once), never `os.WriteFile`.
@@ -20,6 +20,7 @@ concurrent processes.
 
 - `cmd/task.go` — task model, storage, and all `agmd task` subcommands
 - `cmd/task_next.go` — `task next [--claim]`, the atomic work-claiming primitive
+- `cmd/task_comment.go` — `task comment` and per-task comment storage
 - `cmd/task_lock*.go` — per-project file lock and atomic file writes
 - `cmd/task_project.go` — per-project metadata (`project.json`, emoji)
 - `cmd/task_web.go`, `cmd/webui/index.html` — web board and Claude run console

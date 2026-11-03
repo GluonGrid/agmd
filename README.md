@@ -76,9 +76,12 @@ agmd is built for several agents working on the same project at once. Each agent
 
 ```bash
 agmd task next --claim --workflow-id agent-1 --json   # Claim the next ready task
+agmd task comment setup-db "Schema migrated" --author agent-1   # Log progress
 agmd task status setup-db completed                   # Finish it
 agmd task unassign setup-db                           # Release the claim
 ```
+
+Comments are a progress log on a task, shown by `agmd task show`, included in `--json` output, and editable from the web board. The author defaults to `$AGMD_AUTHOR`, or `user`.
 
 `next --claim` atomically picks the highest-priority task that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
 
@@ -114,7 +117,7 @@ The web UI can also **run selected tasks with Claude Code**: tick the tasks you 
 
 ## Storage
 
-Each task is a markdown file with YAML frontmatter at `~/.agmd/task/<project>/<name>.md`. Set `AGMD_HOME` to use another directory. Because tasks are plain files, you can version `~/.agmd` with git to carry it between machines.
+Each task is a markdown file with YAML frontmatter at `~/.agmd/task/<project>/<name>.md`. Claims live in `<project>/assignments.json` and comments in `<project>/comments/<task-id>.json`. Set `AGMD_HOME` to use another directory. Because tasks are plain files, you can version `~/.agmd` with git to carry it between machines.
 
 ## Installation
 
