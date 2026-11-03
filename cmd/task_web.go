@@ -275,6 +275,13 @@ func (h *taskWebHandler) handlePatch(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	unlock, err := lockProject(h.reg, project)
+	if err != nil {
+		writeWebError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	defer unlock()
+
 	task, err := resolveTaskRef(h.reg, project, id)
 	if err != nil {
 		status, code := webErrorStatus(err)
@@ -595,6 +602,24 @@ func parseTranscript(path string, max int) []runEvent {
 	return events
 }
 
+// markTaskInProgress re-reads the task under its project lock, so a CLI agent's
+// concurrent change is not overwritten, and flips it to in_progress unless it
+// is already completed. Failures are ignored: the run starts regardless.
+func markTaskInProgress(reg *registry.Registry, task *Task) {
+	unlock, err := lockProject(reg, task.ProjectName)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	current, err := loadTask(task.FilePath)
+	if err != nil || current.Status == "completed" {
+		return
+	}
+	if setTaskStatus(current, "in_progress") == nil {
+		_ = saveTask(current)
+	}
+}
+
 func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 	var req runRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -636,11 +661,7 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	for _, task := range tasks {
-		if task.Status != "completed" {
-			if err := setTaskStatus(task, "in_progress"); err == nil {
-				_ = saveTask(task)
-			}
-		}
+		markTaskInProgress(h.reg, task)
 	}
 	h.mu.Unlock()
 

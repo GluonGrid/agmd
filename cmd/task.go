@@ -121,6 +121,8 @@ func newTaskError(code, format string, args ...interface{}) error {
 		exitCode = 4
 	case "invalid_transition":
 		exitCode = 5
+	case "conflict":
+		exitCode = 6
 	}
 	return &codedTaskError{
 		Code:     code,
@@ -137,6 +139,12 @@ func printJSON(payload interface{}) error {
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage project tasks",
+	// Arguments are valid once this runs, so later failures are runtime
+	// errors: print the error alone, not the usage text, to keep agent
+	// output short.
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		cmd.SilenceUsage = true
+	},
 	Long: `Manage project tasks with dependencies, priorities, and status tracking.
 
 Tasks are organized by project (derived from repository identity).
@@ -166,6 +174,7 @@ Subcommands:
   status      Update task status
   blocked-by  Add a dependency
   unblock     Remove a dependency
+  next        Show or atomically claim the next ready task
   assign      Attach workflow assignment metadata
   unassign    Remove workflow assignment metadata
   web         Launch a local web UI to browse and edit tasks
@@ -439,6 +448,7 @@ func init() {
 	taskAssignCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskAssignCmd.Flags().StringVar(&taskWorkflowID, "workflow-id", "", "Workflow identifier for this assignment")
 	taskAssignCmd.Flags().StringVar(&taskWorktreePath, "worktree-path", "", "Optional worktree path metadata")
+	taskAssignCmd.Flags().BoolVar(&taskForce, "force", false, "Take over a task already assigned to another workflow")
 	taskAssignCmd.MarkFlagRequired("workflow-id") //nolint:errcheck
 
 	taskUnassignCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
@@ -726,7 +736,30 @@ func saveTaskAssignments(reg *registry.Registry, projectName string, assignments
 		return err
 	}
 	encoded = append(encoded, '\n')
-	return os.WriteFile(assignmentsPath, encoded, 0o644)
+	return writeFileAtomic(assignmentsPath, encoded, 0o644)
+}
+
+// dropTaskAssignments removes assignments for the given task IDs. The caller
+// must hold the project lock.
+func dropTaskAssignments(reg *registry.Registry, projectName string, taskIDs ...string) error {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for _, id := range taskIDs {
+		if _, ok := assignments[id]; ok {
+			delete(assignments, id)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return saveTaskAssignments(reg, projectName, assignments)
 }
 
 // loadTask loads a task from file
@@ -815,7 +848,7 @@ func saveTask(task *Task) error {
 	}
 
 	content := fmt.Sprintf("---\n%s---\n\n%s\n", string(fmBytes), task.Content)
-	return os.WriteFile(task.FilePath, []byte(content), 0644)
+	return writeFileAtomic(task.FilePath, []byte(content), 0644)
 }
 
 // loadProjectTasks loads all tasks for a project
@@ -1678,7 +1711,10 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 	fileContent := fmt.Sprintf("---\nid: %s\nsubject: %s\nstatus: pending\n%sdepends_on: %s\n---\n\n%s",
 		taskID, subject, optionalLines, dependsOnYAML, strings.TrimSpace(content))
 
-	if err := os.WriteFile(filePath, []byte(fileContent+"\n"), 0644); err != nil {
+	if err := writeFileExclusive(filePath, []byte(fileContent+"\n"), 0644); err != nil {
+		if os.IsExist(err) {
+			return newTaskError("invalid_input", "task:%s already exists in project '%s'", name, projectName)
+		}
 		return fmt.Errorf("failed to create task: %w", err)
 	}
 
@@ -1935,21 +1971,29 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete the tasks
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// Another agent may have reopened a task since we listed it.
 	deleted := 0
+	var deletedIDs []string
 	for _, t := range completedTasks {
+		current, loadErr := loadTask(t.FilePath)
+		if loadErr != nil || current.Status != "completed" {
+			continue
+		}
 		if err := os.Remove(t.FilePath); err != nil {
 			fmt.Printf("  Failed to delete %s: %v\n", t.Name, err)
 		} else {
 			deleted++
+			deletedIDs = append(deletedIDs, current.ID)
 		}
 	}
-
-	// Clean up empty project directory
-	taskDir := getTaskDir(reg, projectName)
-	entries, err := os.ReadDir(taskDir)
-	if err == nil && len(entries) == 0 {
-		os.Remove(taskDir)
+	if err := dropTaskAssignments(reg, projectName, deletedIDs...); err != nil {
+		return fmt.Errorf("failed to update assignments: %w", err)
 	}
 
 	if taskJSON {
@@ -2000,6 +2044,12 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
@@ -2095,16 +2145,20 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete the file
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	if err := os.Remove(taskPath); err != nil {
+		if os.IsNotExist(err) {
+			return newTaskError("not_found", "task '%s' was already deleted from project '%s'", name, projectName)
+		}
 		return fmt.Errorf("failed to delete task: %w", err)
 	}
-
-	// Clean up empty project directory
-	taskDir := getTaskDir(reg, projectName)
-	entries, err := os.ReadDir(taskDir)
-	if err == nil && len(entries) == 0 {
-		os.Remove(taskDir)
+	if err := dropTaskAssignments(reg, projectName, taskID); err != nil {
+		return fmt.Errorf("failed to update assignments: %w", err)
 	}
 
 	if taskJSON {
@@ -2166,6 +2220,12 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
 		return err
@@ -2209,6 +2269,12 @@ func runTaskBlockedBy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
 		return err
@@ -2271,6 +2337,12 @@ func runTaskUnblock(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
 		return err
@@ -2342,6 +2414,12 @@ func runTaskAssign(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
 		return err
@@ -2352,10 +2430,15 @@ func runTaskAssign(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load assignments: %w", err)
 	}
 
+	workflowID := strings.TrimSpace(taskWorkflowID)
+	if existing, ok := assignments[task.ID]; ok && existing.WorkflowID != workflowID && !taskForce {
+		return newTaskError("conflict", "task '%s' is already assigned to workflow '%s' (use --force to take it over)", task.Name, existing.WorkflowID)
+	}
+
 	assignment := taskAssignment{
 		TaskID:       task.ID,
 		TaskName:     task.Name,
-		WorkflowID:   strings.TrimSpace(taskWorkflowID),
+		WorkflowID:   workflowID,
 		WorktreePath: strings.TrimSpace(taskWorktreePath),
 		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
@@ -2399,6 +2482,11 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 		if projectErr != nil {
 			return projectErr
 		}
+		unlock, lockErr := lockProject(reg, projectName)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer unlock()
 		assignments, loadErr := loadTaskAssignments(reg, projectName)
 		if loadErr != nil {
 			return fmt.Errorf("failed to load assignments: %w", loadErr)
@@ -2440,6 +2528,11 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 	if projectErr != nil {
 		return projectErr
 	}
+	unlock, lockErr := lockProject(reg, projectName)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	task, taskErr := resolveTaskRef(reg, projectName, taskRef)
 	if taskErr != nil {
 		return taskErr

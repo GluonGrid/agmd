@@ -72,13 +72,33 @@ agmd task emoji 🚀                        # Show an emoji next to the project 
 
 ## Agents
 
-Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"error":{"code":"...","message":"..."}}` with a non-zero exit status, so agents can branch on the code.
+agmd is built for several agents working on the same project at once. Each agent picks a workflow id and claims work with one command:
+
+```bash
+agmd task next --claim --workflow-id agent-1 --json   # Claim the next ready task
+agmd task status setup-db completed                   # Finish it
+agmd task unassign setup-db                           # Release the claim
+```
+
+`next --claim` atomically picks the highest-priority task that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
+
+Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"error":{"code":"...","message":"..."}}` with a non-zero exit status, so agents can branch on the code:
+
+| Code | Exit | Meaning |
+| --- | --- | --- |
+| `invalid_input` | 2 | Bad arguments |
+| `not_found` | 3 | No such task, or nothing ready for `next` |
+| `project_mismatch` | 4 | Task reference names another project |
+| `invalid_transition` | 5 | Status change not allowed |
+| `conflict` | 6 | Task already assigned to another workflow (`assign --force` takes it over) |
 
 ```bash
 agmd task list --json --status ready
 agmd task assign setup-db --workflow-id agent-1 --worktree-path ../wt-1
 agmd task unassign --all --workflow-id agent-1
 ```
+
+Concurrent use is safe: every change to a project's files happens under a per-project file lock (`<project>/.lock`), and files are replaced atomically, so the web board and any number of CLI agents can work side by side.
 
 ## Web board
 

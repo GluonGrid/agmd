@@ -60,7 +60,7 @@ func saveProjectMeta(reg *registry.Registry, projectName string, meta projectMet
 		return err
 	}
 	encoded = append(encoded, '\n')
-	return os.WriteFile(metaPath, encoded, 0o644)
+	return writeFileAtomic(metaPath, encoded, 0o644)
 }
 
 // projectDisplayName prefixes a project name with its emoji when one is set.
@@ -137,6 +137,12 @@ func runTaskEmoji(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	meta, err := loadProjectMeta(reg, projectName)
 	if err != nil {
