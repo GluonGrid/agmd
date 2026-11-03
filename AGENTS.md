@@ -26,7 +26,15 @@ concurrent processes.
 - `cmd/task_comment.go` — `task comment` and per-task comment storage
 - `cmd/task_lock*.go` — per-project file lock and atomic file writes
 - `cmd/task_project.go` — per-project metadata (`project.json`, emoji)
-- `cmd/task_web.go`, `cmd/webui/index.html` — web board and Claude run console
+- `cmd/task_store.go` — task create/delete/claim-release and name validation,
+  shared by the CLI and the web board
+- `cmd/task_web.go` — web server, board state, patch/comment handlers
+- `cmd/task_web_board.go` — create/delete/release endpoints, change feed,
+  localhost-only guard
+- `cmd/task_web_run.go` — Claude Code runs started from the board
+- `cmd/webui/` — the board UI (plain HTML/CSS/JS, embedded; no build step):
+  `board.js` (columns, cards, drag and drop, polling), `panel.js` (task panel),
+  `runs.js` (run modal, console, runs list)
 - `cmd/task_completion.go` — shell completion for task names and flags
 - `pkg/registry` — resolves the data directory (`AGMD_HOME` or `~/.agmd`)
 - `tests/integration` — in-process CLI tests

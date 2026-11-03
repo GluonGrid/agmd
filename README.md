@@ -125,9 +125,18 @@ agmd task web --no-open                   # Serve without opening a browser
 agmd task web --port 8765                 # Serve on a fixed port
 ```
 
-`agmd task web` launches a self-contained local UI (no build step, works offline) that aggregates tasks across every project. Filter by project/status/priority/type/feature, edit status and priority inline, or open a task to edit its subject/type/feature/content. Edits write straight back to the task files, so they show up immediately in `agmd task list`.
+`agmd task web` serves a local kanban board over the same task files (no build step, works offline):
 
-The web UI can also **run selected tasks with Claude Code**: tick the tasks you want, click "▶ Run selected", pick a permission mode, and agmd spawns a `claude` session with a `/goal` prompt to implement them. The chosen tasks are flipped to in-progress and claimed by workflow `web-<session-id>` (kept alive while the run is going, so CLI agents leave them alone), the run's transcript streams live in a console panel, and you get a `claude --resume <id>` hint to continue the session interactively once it finishes. You can launch several runs at once, minimize or close the console, and reopen any run later from the **Sessions** menu in the top bar. The server stays bound to `127.0.0.1` and asks for confirmation before launching, since this spawns processes that can modify your files.
+- **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status; dragging a claimed task back to Ready releases the claim so it can be handed out again. Done stays done.
+- **Agents at a glance.** Every card shows who holds it: a live agent (green, with its last heartbeat), a stale claim (amber), a Claude run started from the board (purple), or an in-progress task nobody has claimed. Filter the board by claim state, and release a claim from the task panel.
+- **Manage tasks.** Create tasks (`n`), edit title, status, priority, type, feature, dependencies and description in the side panel, comment, and delete. Each field saves on its own, so an agent's concurrent change to another field is kept.
+- **Projects** are listed in the sidebar with their open counts, plus an All projects view. Filter with `/`.
+- **Live.** Changes made by agents through the CLI show up within a couple of seconds.
+- **Light and dark** themes follow the system, or pick one in the sidebar.
+
+The board can also **run tasks with Claude Code**: select cards (shift-click or the corner checkbox) or open one, click ▶ Run, and pick a permission mode. agmd starts a `claude` session with a `/goal` prompt, moves the tasks to in progress and claims them as workflow `web-<session-id>` (kept alive while the run is going). The run's transcript streams into a console, and every run stays available from **Runs** in the sidebar, with a `claude --resume <id>` command to continue it.
+
+The server binds to `127.0.0.1` and refuses requests from other sites (foreign `Origin` or non-IP `Host`), since it can start processes that modify your files.
 
 ## Storage
 

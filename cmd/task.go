@@ -464,6 +464,9 @@ func init() {
 // getProjectName returns the project name from explicit selector or repository path.
 func getProjectName() (string, error) {
 	if taskProject != "" {
+		if err := validateName("project", taskProject); err != nil {
+			return "", err
+		}
 		return taskProject, nil
 	}
 
@@ -842,32 +845,11 @@ func extractTaskFrontmatter(content []byte) ([]byte, []byte, error) {
 
 // saveTask saves a task to file
 func saveTask(task *Task) error {
-	// Build frontmatter
-	frontmatter := struct {
-		ID        string   `yaml:"id,omitempty"`
-		Subject   string   `yaml:"subject"`
-		Status    string   `yaml:"status"`
-		Priority  int      `yaml:"priority,omitempty"`
-		Type      string   `yaml:"type,omitempty"`
-		Feature   string   `yaml:"feature,omitempty"`
-		DependsOn []string `yaml:"depends_on"`
-	}{
-		ID:        task.ID,
-		Subject:   task.Subject,
-		Status:    task.Status,
-		Priority:  task.Priority,
-		Type:      task.Type,
-		Feature:   task.Feature,
-		DependsOn: task.DependsOn,
-	}
-
-	fmBytes, err := yaml.Marshal(frontmatter)
+	data, err := encodeTask(task)
 	if err != nil {
 		return err
 	}
-
-	content := fmt.Sprintf("---\n%s---\n\n%s\n", string(fmBytes), task.Content)
-	return writeFileAtomic(task.FilePath, []byte(content), 0644)
+	return writeFileAtomic(task.FilePath, data, 0644)
 }
 
 // loadProjectTasks loads all tasks for a project
@@ -1641,35 +1623,9 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Validate priority
-	if taskPriority < 0 || taskPriority > 4 {
-		return newTaskError("invalid_input", "invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskPriority)
-	}
-
-	// Validate type
-	if !validTaskTypes[taskType] {
-		return newTaskError("invalid_input", "invalid type '%s'. Use: bug, feature, task, or chore", taskType)
-	}
-
-	// Build path: ~/.agmd/task/<project>/<name>.md
-	taskDir := filepath.Join(reg.BasePath, "task", projectName)
-	filePath := filepath.Join(taskDir, name+".md")
-
-	// Check if exists
-	if _, err := os.Stat(filePath); err == nil {
-		return newTaskError("invalid_input", "task:%s already exists in project '%s'", name, projectName)
-	}
-
-	// Create directory
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		return fmt.Errorf("failed to create task directory: %w", err)
-	}
-
 	// Determine content source
-	var content string
-	if taskContent != "" {
-		content = taskContent
-	} else if !isTerminal(os.Stdin) {
+	content := taskContent
+	if content == "" && !isTerminal(os.Stdin) {
 		stdinContent, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("failed to read from stdin: %w", err)
@@ -1677,65 +1633,19 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		content = string(stdinContent)
 	}
 
-	// Parse blocked-by dependencies
-	var dependsOn []string
-	if taskBlockedBy != "" {
-		deps := strings.Split(taskBlockedBy, ",")
-		for _, dep := range deps {
-			dep = strings.TrimSpace(dep)
-			if dep != "" {
-				dependsOn = append(dependsOn, dep)
-			}
-		}
-
-		// Normalize dependencies to task names and de-duplicate.
-		normalized := make([]string, 0, len(dependsOn))
-		seen := make(map[string]bool)
-		for _, dep := range dependsOn {
-			depTask, depErr := resolveTaskRef(reg, projectName, dep)
-			if depErr != nil {
-				return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dep, projectName)
-			}
-			name := depTask.Name
-			if !seen[name] {
-				seen[name] = true
-				normalized = append(normalized, name)
-			}
-		}
-		dependsOn = normalized
+	task, err := createTask(reg, projectName, newTaskSpec{
+		Name:      name,
+		Content:   content,
+		Priority:  taskPriority,
+		Type:      taskType,
+		Feature:   taskFeature,
+		DependsOn: strings.Split(taskBlockedBy, ","),
+	})
+	if err != nil {
+		return err
 	}
-
-	// Build task frontmatter
-	subject := strings.Title(strings.ReplaceAll(name, "-", " "))
-
-	// Format depends_on as YAML array
-	dependsOnYAML := "[]"
-	if len(dependsOn) > 0 {
-		dependsOnYAML = "[" + strings.Join(dependsOn, ", ") + "]"
-	}
-
-	// Build optional lines
-	var optionalLines string
-	if taskFeature != "" {
-		optionalLines += fmt.Sprintf("feature: %s\n", taskFeature)
-	}
-	// Always write priority so it round-trips correctly (0 = P0 critical, 2 = P2 default)
-	optionalLines += fmt.Sprintf("priority: %d\n", taskPriority)
-	// Only include type if non-default (not "task")
-	if taskType != "task" {
-		optionalLines += fmt.Sprintf("type: %s\n", taskType)
-	}
-
-	taskID := computeTaskID(projectName, name)
-	fileContent := fmt.Sprintf("---\nid: %s\nsubject: %s\nstatus: pending\n%sdepends_on: %s\n---\n\n%s",
-		taskID, subject, optionalLines, dependsOnYAML, strings.TrimSpace(content))
-
-	if err := writeFileExclusive(filePath, []byte(fileContent+"\n"), 0644); err != nil {
-		if os.IsExist(err) {
-			return newTaskError("invalid_input", "task:%s already exists in project '%s'", name, projectName)
-		}
-		return fmt.Errorf("failed to create task: %w", err)
-	}
+	filePath := task.FilePath
+	taskID := task.ID
 
 	// Build info message
 	if taskJSON {
@@ -2003,24 +1913,16 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 
 	// Another agent may have reopened a task since we listed it.
 	deleted := 0
-	var deletedIDs []string
 	for _, t := range completedTasks {
 		current, loadErr := loadTask(t.FilePath)
 		if loadErr != nil || current.Status != "completed" {
 			continue
 		}
-		if err := os.Remove(t.FilePath); err != nil {
+		if err := deleteTask(reg, projectName, current); err != nil {
 			fmt.Printf("  Failed to delete %s: %v\n", t.Name, err)
 		} else {
 			deleted++
-			deletedIDs = append(deletedIDs, current.ID)
 		}
-	}
-	if err := dropTaskAssignments(reg, projectName, deletedIDs...); err != nil {
-		return fmt.Errorf("failed to update assignments: %w", err)
-	}
-	if err := removeTaskComments(reg, projectName, deletedIDs...); err != nil {
-		return fmt.Errorf("failed to remove comments: %w", err)
 	}
 
 	if taskJSON {
@@ -2178,17 +2080,8 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 	}
 	defer unlock()
 
-	if err := os.Remove(taskPath); err != nil {
-		if os.IsNotExist(err) {
-			return newTaskError("not_found", "task '%s' was already deleted from project '%s'", name, projectName)
-		}
-		return fmt.Errorf("failed to delete task: %w", err)
-	}
-	if err := dropTaskAssignments(reg, projectName, taskID); err != nil {
-		return fmt.Errorf("failed to update assignments: %w", err)
-	}
-	if err := removeTaskComments(reg, projectName, taskID); err != nil {
-		return fmt.Errorf("failed to remove comments: %w", err)
+	if err := deleteTask(reg, projectName, task); err != nil {
+		return err
 	}
 
 	if taskJSON {
@@ -2577,18 +2470,7 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 		return taskErr
 	}
 
-	assignments, loadErr := loadTaskAssignments(reg, projectName)
-	if loadErr != nil {
-		return fmt.Errorf("failed to load assignments: %w", loadErr)
-	}
-	if _, exists := assignments[task.ID]; !exists {
-		return newTaskError("not_found", "task '%s' is not assigned in project '%s'", task.Name, projectName)
-	}
-	delete(assignments, task.ID)
-	if saveErr := saveTaskAssignments(reg, projectName, assignments); saveErr != nil {
-		return fmt.Errorf("failed to save assignments: %w", saveErr)
-	}
-	if releaseErr := releaseTask(task); releaseErr != nil {
+	if releaseErr := releaseClaim(reg, projectName, task); releaseErr != nil {
 		return releaseErr
 	}
 
