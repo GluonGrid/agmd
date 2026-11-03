@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -658,10 +659,11 @@ func parseTranscript(path string, max int) []runEvent {
 	return events
 }
 
-// markTaskInProgress re-reads the task under its project lock, so a CLI agent's
-// concurrent change is not overwritten, and flips it to in_progress unless it
-// is already completed. Failures are ignored: the run starts regardless.
-func markTaskInProgress(reg *registry.Registry, task *Task) {
+// claimTaskForRun re-reads the task under its project lock, so a CLI agent's
+// concurrent change is not overwritten, flips it to in_progress unless it is
+// already completed, and claims it for workflowID unless another workflow
+// holds it. Failures are ignored: the run starts regardless.
+func claimTaskForRun(reg *registry.Registry, task *Task, workflowID string) {
 	unlock, err := lockProject(reg, task.ProjectName)
 	if err != nil {
 		return
@@ -671,8 +673,46 @@ func markTaskInProgress(reg *registry.Registry, task *Task) {
 	if err != nil || current.Status == "completed" {
 		return
 	}
-	if setTaskStatus(current, "in_progress") == nil {
-		_ = saveTask(current)
+	if setTaskStatus(current, "in_progress") != nil || saveTask(current) != nil {
+		return
+	}
+	assignments, err := loadTaskAssignments(reg, task.ProjectName)
+	if err != nil {
+		return
+	}
+	if _, held := assignments[current.ID]; held {
+		return
+	}
+	assignments[current.ID] = taskAssignment{
+		TaskID:     current.ID,
+		TaskName:   current.Name,
+		WorkflowID: workflowID,
+		UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	_ = saveTaskAssignments(reg, task.ProjectName, assignments)
+}
+
+// heartbeatRun keeps a run's claims alive until done is closed.
+func heartbeatRun(reg *registry.Registry, projects []string, workflowID string, done <-chan struct{}) {
+	ttl, err := claimTTL()
+	if err != nil || ttl <= 0 {
+		return
+	}
+	interval := ttl / 3
+	if interval > 5*time.Minute {
+		interval = 5 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			for _, project := range projects {
+				_ = heartbeatWorkflow(reg, project, workflowID)
+			}
+		}
 	}
 }
 
@@ -696,7 +736,14 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve refs + flip to in_progress under the file mutex; released before spawn.
+	sessionID, err := newSessionID()
+	if err != nil {
+		writeWebError(w, http.StatusInternalServerError, "internal", fmt.Sprintf("failed to generate session id: %v", err))
+		return
+	}
+	workflowID := "web-" + sessionID
+
+	// Resolve refs + claim under the file mutex; released before spawn.
 	h.mu.Lock()
 	tasks := make([]*Task, 0, len(req.Tasks))
 	summaries := make([]runTaskSummary, 0, len(req.Tasks))
@@ -716,18 +763,16 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 			Subject: task.Subject,
 		})
 	}
+	runProjects := []string{}
 	for _, task := range tasks {
-		markTaskInProgress(h.reg, task)
+		claimTaskForRun(h.reg, task, workflowID)
+		if !slices.Contains(runProjects, task.ProjectName) {
+			runProjects = append(runProjects, task.ProjectName)
+		}
 	}
 	h.mu.Unlock()
 
 	prompt := buildGoalPrompt(tasks)
-
-	sessionID, err := newSessionID()
-	if err != nil {
-		writeWebError(w, http.StatusInternalServerError, "internal", fmt.Sprintf("failed to generate session id: %v", err))
-		return
-	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -783,8 +828,11 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 	h.runs[sessionID] = info
 	h.runMu.Unlock()
 
+	runDone := make(chan struct{})
+	go heartbeatRun(h.reg, runProjects, workflowID, runDone)
 	go func() {
 		werr := cmd.Wait()
+		close(runDone)
 		if logFile != nil {
 			logFile.Close()
 		}

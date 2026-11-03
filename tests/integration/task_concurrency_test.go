@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -160,5 +161,25 @@ func TestTaskConcurrency_ParallelNewSameNameCreatesOnce(t *testing.T) {
 	}
 	if succeeded != 1 {
 		t.Errorf("%d processes created task 'shared', want exactly 1", succeeded)
+	}
+}
+
+func TestTaskJSONErrorIsOneLineOnStderr(t *testing.T) {
+	setup(t)
+	cmd := exec.Command(agmdBinary(t), "task", "next", "--claim", "--workflow-id", "x", "--project", "empty", "--json")
+	cmd.Env = os.Environ()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected a non-zero exit")
+	}
+	got := strings.TrimSpace(stderr.String())
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if strings.Contains(got, "\n") || json.Unmarshal([]byte(got), &payload) != nil || payload.Error.Code != "not_found" {
+		t.Errorf("stderr should be exactly one JSON error line, got:\n%s", got)
 	}
 }

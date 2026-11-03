@@ -170,3 +170,53 @@ func TestTaskClaim_InvalidStaleAfter(t *testing.T) {
 		t.Errorf("expected invalid --stale-after error, got %v", err)
 	}
 }
+
+func TestTaskClaim_BlockedTaskIsNeverHandedOut(t *testing.T) {
+	registryPath := setup(t)
+	chdir(t)
+	run(t, "task", "new", "a", "--project", "p", "--content", "work")
+	run(t, "task", "new", "b", "--project", "p", "--content", "work", "--blocked-by", "a")
+	run(t, "task", "status", "a", "in_progress", "--project", "p")
+	run(t, "task", "assign", "b", "--workflow-id", "agent-1", "--project", "p")
+	ageClaims(t, registryPath, 3*time.Hour)
+
+	// b's claim is stale but b is blocked: neither a takeover nor a resume.
+	if resp, err := claim(t, "agent-2"); err == nil {
+		t.Errorf("agent-2 should get nothing, got %+v", resp)
+	}
+	if resp, err := claim(t, "agent-1"); err == nil {
+		t.Errorf("agent-1 should not resume blocked task, got %+v", resp)
+	}
+
+	// With a ready task available, agent-1 claims it instead of resuming b.
+	run(t, "task", "new", "c", "--project", "p", "--content", "work")
+	resp, err := claim(t, "agent-1")
+	if err != nil || resp.Action != "claim" || resp.Task.Name != "c" {
+		t.Errorf("agent-1 should claim c, got resp=%+v err=%v", resp, err)
+	}
+}
+
+func TestTaskClaim_UnassignReleasesTask(t *testing.T) {
+	setup(t)
+	chdir(t)
+	run(t, "task", "new", "a", "--project", "p", "--content", "work")
+	run(t, "task", "new", "b", "--project", "p", "--content", "work")
+	if _, err := claim(t, "agent-1"); err != nil {
+		t.Fatal(err)
+	}
+	run(t, "task", "unassign", "a", "--project", "p")
+	if out := run(t, "task", "show", "a", "--project", "p", "--json"); !strings.Contains(out, `"status":"pending"`) {
+		t.Errorf("unassigned task should be pending again:\n%s", out)
+	}
+
+	if _, err := claim(t, "agent-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claim(t, "agent-3"); err != nil {
+		t.Fatal(err)
+	}
+	run(t, "task", "unassign", "--all", "--workflow-id", "agent-3", "--project", "p")
+	if resp, err := claim(t, "agent-4"); err != nil || resp.Action != "claim" {
+		t.Errorf("task released by unassign --all should be claimable: resp=%+v err=%v", resp, err)
+	}
+}

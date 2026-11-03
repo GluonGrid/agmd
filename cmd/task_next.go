@@ -124,7 +124,7 @@ func runTaskNext(cmd *cobra.Command, args []string) error {
 	var picked *Task
 	if taskClaim {
 		action = "claim"
-		if held := heldTask(tasks, assignments, workflowID); held != nil {
+		if held := heldTask(tasks, taskMap, assignments, workflowID); held != nil {
 			picked, action = held, "resume"
 		}
 	}
@@ -221,13 +221,14 @@ func nextReadyTask(tasks []*Task, taskMap map[string]*Task, assignments map[stri
 		tasks = filterTasksByFeature(tasks, feature)
 	}
 	for _, t := range sortTasksByPriorityAndStatus(tasks, taskMap) {
+		status := computeTaskStatus(t, taskMap)
 		if a, assigned := assignments[t.ID]; assigned {
-			if t.Status != "completed" && claimIsStale(a, ttl, now) {
+			if (status == StatusReady || status == StatusInProgress) && claimIsStale(a, ttl, now) {
 				return t
 			}
 			continue
 		}
-		if computeTaskStatus(t, taskMap) == StatusReady {
+		if status == StatusReady {
 			return t
 		}
 	}
@@ -266,6 +267,26 @@ func claimIsStale(a taskAssignment, ttl time.Duration, now time.Time) bool {
 		return false
 	}
 	return now.Sub(updated) >= ttl
+}
+
+// heartbeatWorkflow refreshes every claim workflowID holds in a project.
+func heartbeatWorkflow(reg *registry.Registry, projectName, workflowID string) error {
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for id, a := range assignments {
+		if a.WorkflowID == workflowID {
+			refreshClaim(assignments, id, now)
+		}
+	}
+	return saveTaskAssignments(reg, projectName, assignments)
 }
 
 // refreshClaim records a sign of life on a claim.
@@ -357,12 +378,22 @@ func runTaskHeartbeat(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// heldTask returns an unfinished task already assigned to workflowID.
-func heldTask(tasks []*Task, assignments map[string]taskAssignment, workflowID string) *Task {
-	for _, t := range tasks {
-		if a, ok := assignments[t.ID]; ok && a.WorkflowID == workflowID && t.Status != "completed" {
+// heldTask returns a workable task already assigned to workflowID, preferring
+// one it has started. Tasks pre-assigned while still blocked are skipped.
+func heldTask(tasks []*Task, taskMap map[string]*Task, assignments map[string]taskAssignment, workflowID string) *Task {
+	var ready *Task
+	for _, t := range sortTasksByPriorityAndStatus(tasks, taskMap) {
+		if a, ok := assignments[t.ID]; !ok || a.WorkflowID != workflowID {
+			continue
+		}
+		switch computeTaskStatus(t, taskMap) {
+		case StatusInProgress:
 			return t
+		case StatusReady:
+			if ready == nil {
+				ready = t
+			}
 		}
 	}
-	return nil
+	return ready
 }

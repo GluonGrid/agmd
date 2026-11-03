@@ -142,8 +142,10 @@ var taskCmd = &cobra.Command{
 	// Arguments are valid once this runs, so later failures are runtime
 	// errors: print the error alone, not the usage text, to keep agent
 	// output short.
+	// Execute prints the error itself (as JSON with --json), so cobra must not.
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
 	},
 	Long: `Manage project tasks with dependencies, priorities, and status tracking.
 
@@ -356,7 +358,7 @@ var taskAssignCmd = &cobra.Command{
 
 var taskUnassignCmd = &cobra.Command{
 	Use:   "unassign [task-id-or-name]",
-	Short: "Remove assignment metadata from tasks",
+	Short: "Release task claims (in_progress tasks go back to pending)",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if taskUnassignAll {
 			if len(args) != 0 {
@@ -740,6 +742,20 @@ func saveTaskAssignments(reg *registry.Registry, projectName string, assignments
 	}
 	encoded = append(encoded, '\n')
 	return writeFileAtomic(assignmentsPath, encoded, 0o644)
+}
+
+// releaseTask puts an unclaimed in_progress task back to pending, so that
+// `task next --claim` can hand it out again. The caller must hold the project
+// lock.
+func releaseTask(task *Task) error {
+	if task.Status != "in_progress" {
+		return nil
+	}
+	task.Status = "pending"
+	if err := saveTask(task); err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
+	return nil
 }
 
 // dropTaskAssignments removes assignments for the given task IDs. The caller
@@ -2507,9 +2523,11 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 		}
 		removed := 0
 		workflowID := strings.TrimSpace(taskWorkflowID)
+		var released []string
 		for key, assignment := range assignments {
 			if assignment.WorkflowID == workflowID {
 				delete(assignments, key)
+				released = append(released, assignment.TaskName)
 				removed++
 			}
 		}
@@ -2518,6 +2536,13 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 		}
 		if saveErr := saveTaskAssignments(reg, projectName, assignments); saveErr != nil {
 			return fmt.Errorf("failed to save assignments: %w", saveErr)
+		}
+		for _, name := range released {
+			if task, loadErr := loadTask(getTaskPath(reg, projectName, name)); loadErr == nil {
+				if releaseErr := releaseTask(task); releaseErr != nil {
+					return releaseErr
+				}
+			}
 		}
 		if taskJSON {
 			return printJSON(struct {
@@ -2562,6 +2587,9 @@ func runTaskUnassign(cmd *cobra.Command, args []string) error {
 	delete(assignments, task.ID)
 	if saveErr := saveTaskAssignments(reg, projectName, assignments); saveErr != nil {
 		return fmt.Errorf("failed to save assignments: %w", saveErr)
+	}
+	if releaseErr := releaseTask(task); releaseErr != nil {
+		return releaseErr
 	}
 
 	if taskJSON {

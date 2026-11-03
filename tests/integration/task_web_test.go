@@ -187,6 +187,12 @@ func TestTaskWeb_RunLaunches(t *testing.T) {
 		t.Errorf("launched task status = %q, want in_progress", task.Status)
 	}
 
+	// ...and claimed by the run, so agents' `next --claim` leaves it alone.
+	claimOut := run(t, "task", "show", "runnable", "--project", "proj-a", "--json")
+	if !strings.Contains(claimOut, `"workflow_id":"web-`+info.SessionID+`"`) {
+		t.Errorf("launched task should be claimed by web-%s:\n%s", info.SessionID, claimOut)
+	}
+
 	// The run should be queryable by id.
 	rstatus, rdata := webGet(t, srv.URL+"/api/run/"+info.SessionID)
 	if rstatus != http.StatusOK {

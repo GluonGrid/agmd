@@ -10,7 +10,9 @@ concurrent processes.
 
 - Every read-modify-write of a project's files (task `.md` files,
   `assignments.json`, `project.json`, `comments/*.json`) must hold `lockProject(reg, project)`
-  (`cmd/task_lock.go`). Never hold it while waiting for user input.
+  (`cmd/task_lock.go`). Never hold it while waiting for user input, and never
+  call it while already holding it: flock is per open file, so a nested call
+  in the same process blocks forever.
 - Write files with `writeFileAtomic` (replace) or `writeFileExclusive`
   (create-once), never `os.WriteFile`.
 - `tests/integration/task_concurrency_test.go` runs a built binary as parallel
