@@ -81,9 +81,23 @@ agmd task status setup-db completed                   # Finish it
 agmd task unassign setup-db                           # Release the claim
 ```
 
-Comments are a progress log on a task, shown by `agmd task show`, included in `--json` output, and editable from the web board. The author defaults to `$AGMD_AUTHOR`, or `user`.
-
 `next --claim` atomically picks the highest-priority task that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
+
+### Stale claims
+
+If an agent dies mid-task, its claim expires so the work isn't stuck. A claim stays alive while its workflow shows signs of life: claiming or resuming with `next --claim`, `agmd task heartbeat --workflow-id agent-1`, or a comment whose `--author` is the workflow id. After `--stale-after` without any (default `$AGMD_CLAIM_TTL`, else `2h`; `0` disables expiry), `next --claim` may hand the task to another workflow (`"action":"takeover"`, `"taken_over_from":"agent-1"`) and records the takeover as a comment. Ready, unclaimed tasks are still preferred over stale ones of the same priority.
+
+```bash
+agmd task heartbeat --workflow-id agent-1             # Refresh all of agent-1's claims
+agmd task heartbeat setup-db --workflow-id agent-1    # Fails with "conflict" if the claim was lost
+AGMD_CLAIM_TTL=30m agmd task next --claim --workflow-id agent-2
+```
+
+### Comments
+
+Comments are a progress log on a task, shown by `agmd task show`, included in `--json` output, and can be added from the web board. The author defaults to `$AGMD_AUTHOR`, or `user`.
+
+### JSON and errors
 
 Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"error":{"code":"...","message":"..."}}` with a non-zero exit status, so agents can branch on the code:
 

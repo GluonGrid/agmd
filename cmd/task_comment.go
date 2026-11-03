@@ -94,6 +94,17 @@ func runTaskComment(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A comment from the claiming workflow is a sign of life for its claim.
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
+	if a, held := assignments[task.ID]; held && a.WorkflowID == comment.Author {
+		refreshClaim(assignments, task.ID, time.Now())
+		if err := saveTaskAssignments(reg, projectName, assignments); err != nil {
+			return fmt.Errorf("failed to save assignments: %w", err)
+		}
+	}
 
 	if taskJSON {
 		return printJSON(struct {

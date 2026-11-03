@@ -19,7 +19,8 @@ concurrent processes.
 ## Layout
 
 - `cmd/task.go` — task model, storage, and all `agmd task` subcommands
-- `cmd/task_next.go` — `task next [--claim]`, the atomic work-claiming primitive
+- `cmd/task_next.go` — `task next [--claim]` (atomic claiming, stale-claim
+  takeover) and `task heartbeat`
 - `cmd/task_comment.go` — `task comment` and per-task comment storage
 - `cmd/task_lock*.go` — per-project file lock and atomic file writes
 - `cmd/task_project.go` — per-project metadata (`project.json`, emoji)

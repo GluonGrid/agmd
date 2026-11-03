@@ -176,6 +176,7 @@ Subcommands:
   unblock     Remove a dependency
   next        Show or atomically claim the next ready task
   comment     Add a comment (progress note) to a task
+  heartbeat   Keep a workflow's claims from expiring
   assign      Attach workflow assignment metadata
   unassign    Remove workflow assignment metadata
   web         Launch a local web UI to browse and edit tasks
