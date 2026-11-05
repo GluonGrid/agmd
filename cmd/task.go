@@ -1714,9 +1714,12 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 		fmt.Print(string(raw))
 		return nil
 	}
-	taskMap := map[string]*Task{
-		task.Name: task,
+	// Dependencies are judged against their own status, so load the siblings.
+	tasks, err := loadProjectTasks(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load tasks: %w", err)
 	}
+	taskMap := buildTaskMap(tasks)
 	assignments, err := loadTaskAssignments(reg, projectName)
 	if err != nil {
 		return fmt.Errorf("failed to load assignments: %w", err)

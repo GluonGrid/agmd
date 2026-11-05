@@ -220,3 +220,18 @@ func TestTaskClaim_UnassignReleasesTask(t *testing.T) {
 		t.Errorf("task released by unassign --all should be claimable: resp=%+v err=%v", resp, err)
 	}
 }
+
+func TestTaskShow_ComputedStatusUsesDependencies(t *testing.T) {
+	setup(t)
+	chdir(t)
+	run(t, "task", "new", "a", "--project", "p", "--content", "work")
+	run(t, "task", "new", "b", "--project", "p", "--content", "work", "--blocked-by", "a")
+
+	if out := run(t, "task", "show", "b", "--project", "p", "--json"); !strings.Contains(out, `"computed_status":"blocked"`) || !strings.Contains(out, `"pending_dependencies":["a"]`) {
+		t.Errorf("b should be blocked on a:\n%s", out)
+	}
+	run(t, "task", "status", "a", "completed", "--project", "p")
+	if out := run(t, "task", "show", "b", "--project", "p", "--json"); !strings.Contains(out, `"computed_status":"ready"`) {
+		t.Errorf("b should be ready once a is completed:\n%s", out)
+	}
+}
