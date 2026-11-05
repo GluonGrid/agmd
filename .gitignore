@@ -1,0 +1,5 @@
+tests/tmp/
+dist/
+.claude/settings.local.json
+.claude/worktrees/
+/agmd

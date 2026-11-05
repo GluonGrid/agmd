@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agmd board</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Projects">
+    <div class="brand"><span class="logo" data-icon="logo"></span>agmd <small>tasks</small></div>
+    <nav class="nav">
+      <button type="button" class="nav-item" data-project="" id="nav-all"></button>
+      <h2 class="nav-label">Projects</h2>
+      <div id="project-list"></div>
+    </nav>
+    <div class="sidebar-foot">
+      <button type="button" class="foot-btn hidden" id="btn-runs" aria-haspopup="true" aria-controls="runs-tray">
+        <span class="nav-icon" data-icon="play"></span>Claude runs <span class="pill" id="runs-badge">0</span>
+      </button>
+      <button type="button" class="foot-btn" id="btn-theme" title="Switch theme"><span class="nav-icon" id="theme-icon"></span><span id="theme-label">System theme</span></button>
+      <p class="keys" id="keys"></p>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="title-block">
+        <h1 id="board-title">All projects</h1>
+        <div class="status-line" id="status-line" aria-label="Task counts; select one to filter"></div>
+        <p class="conn hidden" id="conn" role="status"><span data-icon="alert"></span>Can't reach the agmd server. Showing the last known state; retrying…</p>
+      </div>
+      <div class="filters" role="search">
+        <label class="sr-only" for="m-project">Project</label>
+        <select id="m-project" class="mobile-only"></select>
+        <label class="sr-only" for="f-search">Filter tasks</label>
+        <input id="f-search" type="search" placeholder="Filter tasks" autocomplete="off" aria-keyshortcuts="/">
+        <label class="sr-only" for="f-show">Show</label>
+        <select id="f-show">
+          <option value="">All tasks</option>
+          <option value="working">Being worked on</option>
+          <option value="attention">Needs attention</option>
+          <option value="blocked">Blocked</option>
+          <option value="unclaimed">Unclaimed</option>
+        </select>
+        <label class="sr-only" for="f-feature">Feature</label>
+        <select id="f-feature"></select>
+        <button type="button" class="btn subtle hidden" id="btn-clear">Clear filters</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn hidden" id="btn-run"><span data-icon="play"></span>Run <span class="pill" id="run-count"></span></button>
+        <button type="button" class="btn primary" id="btn-new" aria-keyshortcuts="n"><span data-icon="plus"></span>New task</button>
+      </div>
+    </header>
+    <div class="board" id="board" aria-label="Task board"></div>
+  </main>
+</div>
+
+<aside class="panel" id="panel" role="dialog" aria-modal="false" tabindex="-1"></aside>
+
+<dialog id="dialog" class="modal"></dialog>
+
+<div class="modal-scrim" id="run-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="run-title-h">
+    <h2 id="run-title-h">Run with Claude Code</h2>
+    <p>Starts one <code>claude</code> session (<code>/goal</code>) to implement these tasks. They move to In progress and are claimed by the run.</p>
+    <ul class="tasklist" id="run-tasklist"></ul>
+    <label class="field-label" for="run-perm">Permission mode</label>
+    <select id="run-perm">
+      <option value="acceptEdits">acceptEdits: apply edits, ask for the rest</option>
+      <option value="plan">plan: read-only, no edits</option>
+      <option value="default">default: ask as usual</option>
+      <option value="bypassPermissions">bypassPermissions: fully unattended</option>
+    </select>
+    <p class="warn" id="run-warn"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="run-cancel">Cancel</button>
+      <button type="button" class="btn primary" id="run-go"><span data-icon="play"></span>Start run</button>
+    </div>
+  </div>
+</div>
+
+<div class="runs-tray hidden" id="runs-tray" role="region" aria-label="Claude runs">
+  <h2 class="tray-head">Claude Code runs</h2>
+  <div id="runs-list"></div>
+</div>
+
+<section class="run-console" id="run-console" aria-label="Run console">
+  <div class="run-head" id="run-head">
+    <span id="run-stat" class="run-stat" role="status"></span>
+    <span id="run-title" class="run-title"></span>
+    <button type="button" class="icon-btn" id="run-resume" title="Copy the claude --resume command" aria-label="Copy the claude --resume command"><span data-icon="copy"></span></button>
+    <button type="button" class="icon-btn" id="run-min" title="Minimize" aria-label="Minimize console"><span data-icon="minimize"></span></button>
+    <button type="button" class="icon-btn" id="run-close" title="Close (the run keeps going)" aria-label="Close console; the run keeps going"><span data-icon="x"></span></button>
+  </div>
+  <div class="run-meta" id="run-meta"></div>
+  <div class="run-events" id="run-events" aria-live="polite"></div>
+</section>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="ui.js"></script>
+<script src="board.js"></script>
+<script src="panel.js"></script>
+<script src="runs.js"></script>
+</body>
+</html>
