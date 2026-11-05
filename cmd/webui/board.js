@@ -243,7 +243,7 @@
   // ---------- URL state ----------
   function writeHash() {
     var p = new URLSearchParams();
-    if (state.project) p.set("project", state.project);
+    if (state.project !== null) p.set("project", state.project); // "" = all projects
     if (state.filters.show) p.set("show", state.filters.show);
     if (state.filters.feature) p.set("feature", state.filters.feature);
     if (state.filters.q) p.set("q", state.filters.q);
@@ -263,11 +263,28 @@
   var render = (App.render = function () {
     // Rebuilding the board mid-drag would drop the dragged card.
     if (state.dragId) { state.renderAfterDrag = true; return; }
+    var restore = focusedControl();
     renderSidebar();
     renderHeader();
     renderBoard();
     writeHash();
+    if (restore) {
+      var again = document.querySelector(restore);
+      if (again) again.focus({ preventScroll: true });
+    }
   });
+
+  // Sidebar items and header counts are rebuilt on every render (each poll
+  // that sees an agent's change), so remember which one had keyboard focus.
+  function focusedControl() {
+    var el = document.activeElement;
+    if (!el || !el.closest) return null;
+    var nav = el.closest(".nav-item");
+    if (nav) return '.nav-item[data-project="' + CSS.escape(nav.dataset.project) + '"]';
+    var stat = el.closest("#status-line button[data-show]");
+    if (stat) return '#status-line button[data-show="' + CSS.escape(stat.dataset.show) + '"]';
+    return null;
+  }
 
   function projectStats(project) {
     var open = 0, working = 0, attention = 0;
@@ -296,10 +313,12 @@
     }).join("");
 
     var m = $("m-project");
-    m.innerHTML = '<option value="">All projects</option>' + state.projects.map(function (p) {
-      return '<option value="' + esc(p.name) + '">' + esc((p.emoji ? p.emoji + " " : "") + p.name) + "</option>";
-    }).join("");
-    m.value = state.project || "";
+    if (document.activeElement !== m) {
+      m.innerHTML = '<option value="">All projects</option>' + state.projects.map(function (p) {
+        return '<option value="' + esc(p.name) + '">' + esc((p.emoji ? p.emoji + " " : "") + p.name) + "</option>";
+      }).join("");
+      m.value = state.project || "";
+    }
   }
 
   function renderHeader() {
@@ -331,10 +350,12 @@
     var names = Object.keys(features).sort();
     var sel = $("f-feature");
     if (names.indexOf(state.filters.feature) < 0) state.filters.feature = "";
-    sel.innerHTML = '<option value="">All features</option>' + names.map(function (n) {
-      return '<option value="' + esc(n) + '">' + esc(n) + "</option>";
-    }).join("");
-    sel.value = state.filters.feature;
+    if (document.activeElement !== sel) {
+      sel.innerHTML = '<option value="">All features</option>' + names.map(function (n) {
+        return '<option value="' + esc(n) + '">' + esc(n) + "</option>";
+      }).join("");
+      sel.value = state.filters.feature;
+    }
     sel.classList.toggle("hidden", names.length === 0);
     $("f-show").value = state.filters.show;
     if ($("f-search").value !== state.filters.q) $("f-search").value = state.filters.q;
