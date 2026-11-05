@@ -262,7 +262,7 @@ func TestTaskWeb_RejectsCrossSiteRequests(t *testing.T) {
 func TestTaskWeb_ServesBoardAssets(t *testing.T) {
 	setup(t)
 	srv := boardServer(t)
-	for path, want := range map[string]string{"/": "board.js", "/board.js": "App.loadState", "/app.css": "--accent", "/panel.js": "App.Panel", "/runs.js": "App.Runs"} {
+	for path, want := range map[string]string{"/": "board.js", "/board.js": "App.loadState", "/app.css": "--accent", "/panel.js": "App.Panel", "/runs.js": "App.Runs", "/ui.js": "App.confirm"} {
 		status, data := webDo(t, "GET", srv.URL+path, nil, nil)
 		if status != http.StatusOK || !strings.Contains(string(data), want) {
 			t.Errorf("GET %s = %d, missing %q", path, status, want)

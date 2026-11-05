@@ -33,8 +33,10 @@ concurrent processes.
   localhost-only guard
 - `cmd/task_web_run.go` — Claude Code runs started from the board
 - `cmd/webui/` — the board UI (plain HTML/CSS/JS, embedded; no build step):
-  `board.js` (columns, cards, drag and drop, polling), `panel.js` (task panel),
-  `runs.js` (run modal, console, runs list)
+  `ui.js` (App namespace, API client, icons, confirm/prompt dialogs),
+  `board.js` (columns, cards, attention counts, keyboard, drag and drop,
+  polling), `panel.js` (task panel), `runs.js` (run modal, console, runs list)
+- `PRODUCT.md` — product record used for design work
 - `cmd/task_completion.go` — shell completion for task names and flags
 - `pkg/registry` — resolves the data directory (`AGMD_HOME` or `~/.agmd`)
 - `tests/integration` — in-process CLI tests

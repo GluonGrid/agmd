@@ -8,21 +8,19 @@
 </head>
 <body>
 <div class="app">
-  <aside class="sidebar">
-    <div class="brand"><span class="logo">◧</span> agmd <small>tasks</small></div>
+  <aside class="sidebar" aria-label="Projects">
+    <div class="brand"><span class="logo" data-icon="logo"></span>agmd <small>tasks</small></div>
     <nav class="nav">
-      <button class="nav-item" data-project="" id="nav-all">
-        <span class="nav-icon">▦</span><span class="nav-name">All projects</span><span class="nav-count" id="count-all"></span>
-      </button>
-      <div class="nav-label">Projects</div>
+      <button type="button" class="nav-item" data-project="" id="nav-all"></button>
+      <h2 class="nav-label">Projects</h2>
       <div id="project-list"></div>
     </nav>
     <div class="sidebar-foot">
-      <button class="foot-btn hidden" id="btn-runs" title="Claude Code runs started from this board">
-        <span class="nav-icon">▶</span> Runs <span class="pill" id="runs-badge">0</span>
+      <button type="button" class="foot-btn hidden" id="btn-runs" aria-haspopup="true" aria-controls="runs-tray">
+        <span class="nav-icon" data-icon="play"></span>Claude runs <span class="pill" id="runs-badge">0</span>
       </button>
-      <button class="foot-btn" id="btn-theme" title="Switch theme"><span class="nav-icon" id="theme-icon">◐</span> <span id="theme-label">System theme</span></button>
-      <div class="keys"><kbd>n</kbd> new · <kbd>/</kbd> filter · <kbd>esc</kbd> close</div>
+      <button type="button" class="foot-btn" id="btn-theme" title="Switch theme"><span class="nav-icon" id="theme-icon"></span><span id="theme-label">System theme</span></button>
+      <p class="keys" id="keys"></p>
     </div>
   </aside>
 
@@ -30,69 +28,79 @@
     <header class="topbar">
       <div class="title-block">
         <h1 id="board-title">All projects</h1>
-        <span class="subtle" id="board-sub"></span>
+        <div class="status-line" id="status-line" aria-label="Task counts; select one to filter"></div>
+        <p class="conn hidden" id="conn" role="status"><span data-icon="alert"></span>Can't reach the agmd server. Showing the last known state; retrying…</p>
       </div>
-      <div class="filters">
-        <input id="f-search" type="search" placeholder="Filter tasks…   /" autocomplete="off">
-        <select id="f-claim" title="Filter by claim">
+      <div class="filters" role="search">
+        <label class="sr-only" for="m-project">Project</label>
+        <select id="m-project" class="mobile-only"></select>
+        <label class="sr-only" for="f-search">Filter tasks</label>
+        <input id="f-search" type="search" placeholder="Filter tasks" autocomplete="off" aria-keyshortcuts="/">
+        <label class="sr-only" for="f-show">Show</label>
+        <select id="f-show">
           <option value="">All tasks</option>
-          <option value="claimed">Claimed by an agent</option>
-          <option value="stale">Stale claims</option>
-          <option value="orphan">In progress, no agent</option>
+          <option value="working">Being worked on</option>
+          <option value="attention">Needs attention</option>
+          <option value="blocked">Blocked</option>
           <option value="unclaimed">Unclaimed</option>
         </select>
-        <select id="f-feature" title="Filter by feature"></select>
+        <label class="sr-only" for="f-feature">Feature</label>
+        <select id="f-feature"></select>
+        <button type="button" class="btn subtle hidden" id="btn-clear">Clear filters</button>
       </div>
       <div class="actions">
-        <button class="btn hidden" id="btn-run">▶ Run <span id="run-count"></span></button>
-        <button class="btn primary" id="btn-new">+ New task</button>
+        <button type="button" class="btn hidden" id="btn-run"><span data-icon="play"></span>Run <span class="pill" id="run-count"></span></button>
+        <button type="button" class="btn primary" id="btn-new" aria-keyshortcuts="n"><span data-icon="plus"></span>New task</button>
       </div>
     </header>
-    <div class="board" id="board"></div>
+    <div class="board" id="board" aria-label="Task board"></div>
   </main>
 </div>
 
-<aside class="panel" id="panel" aria-hidden="true"></aside>
+<aside class="panel" id="panel" role="dialog" aria-modal="false" tabindex="-1"></aside>
+
+<dialog id="dialog" class="modal"></dialog>
 
 <div class="modal-scrim" id="run-modal">
-  <div class="modal">
-    <h3>Run with Claude Code</h3>
-    <p>Starts one <code>claude</code> session (<code>/goal</code>) to implement these tasks. They are moved to <b>in progress</b> and claimed by the run.</p>
-    <div class="tasklist" id="run-tasklist"></div>
-    <label for="run-perm">Permission mode</label>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="run-title-h">
+    <h2 id="run-title-h">Run with Claude Code</h2>
+    <p>Starts one <code>claude</code> session (<code>/goal</code>) to implement these tasks. They move to In progress and are claimed by the run.</p>
+    <ul class="tasklist" id="run-tasklist"></ul>
+    <label class="field-label" for="run-perm">Permission mode</label>
     <select id="run-perm">
-      <option value="bypassPermissions">bypassPermissions: fully unattended</option>
-      <option value="acceptEdits">acceptEdits: auto-apply edits, prompt for the rest</option>
+      <option value="acceptEdits">acceptEdits: apply edits, ask for the rest</option>
       <option value="plan">plan: read-only, no edits</option>
-      <option value="default">default: prompt as usual</option>
+      <option value="default">default: ask as usual</option>
+      <option value="bypassPermissions">bypassPermissions: fully unattended</option>
     </select>
-    <div class="warn" id="run-warn"></div>
+    <p class="warn" id="run-warn"></p>
     <div class="modal-actions">
-      <button class="btn" id="run-cancel">Cancel</button>
-      <button class="btn primary" id="run-go">▶ Start run</button>
+      <button type="button" class="btn" id="run-cancel">Cancel</button>
+      <button type="button" class="btn primary" id="run-go"><span data-icon="play"></span>Start run</button>
     </div>
   </div>
 </div>
 
-<div class="runs-tray hidden" id="runs-tray">
-  <div class="tray-head">Claude Code runs</div>
+<div class="runs-tray hidden" id="runs-tray" role="region" aria-label="Claude runs">
+  <h2 class="tray-head">Claude Code runs</h2>
   <div id="runs-list"></div>
 </div>
 
-<div class="run-console" id="run-console">
+<section class="run-console" id="run-console" aria-label="Run console">
   <div class="run-head" id="run-head">
-    <span id="run-stat" class="run-stat"></span>
+    <span id="run-stat" class="run-stat" role="status"></span>
     <span id="run-title" class="run-title"></span>
-    <button class="icon-btn" id="run-resume" title="Copy 'claude --resume' command">⧉</button>
-    <button class="icon-btn" id="run-min" title="Minimize">▁</button>
-    <button class="icon-btn" id="run-close" title="Close (the run keeps going)">×</button>
+    <button type="button" class="icon-btn" id="run-resume" title="Copy the claude --resume command" aria-label="Copy the claude --resume command"><span data-icon="copy"></span></button>
+    <button type="button" class="icon-btn" id="run-min" title="Minimize" aria-label="Minimize console"><span data-icon="minimize"></span></button>
+    <button type="button" class="icon-btn" id="run-close" title="Close (the run keeps going)" aria-label="Close console; the run keeps going"><span data-icon="x"></span></button>
   </div>
   <div class="run-meta" id="run-meta"></div>
-  <div class="run-events" id="run-events"></div>
-</div>
+  <div class="run-events" id="run-events" aria-live="polite"></div>
+</section>
 
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite"></div>
 
+<script src="ui.js"></script>
 <script src="board.js"></script>
 <script src="panel.js"></script>
 <script src="runs.js"></script>

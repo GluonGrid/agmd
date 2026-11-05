@@ -24,17 +24,30 @@
     $("run-warn").textContent = w.text;
   }
 
+  // Blocked and finished tasks can't be worked on yet, so a run skips them.
   function openModal(tasks) {
-    pending = tasks.filter(function (t) { return t && t.status !== "completed"; });
-    if (!pending.length) return;
+    tasks = tasks.filter(Boolean);
+    pending = tasks.filter(function (t) { return t.status !== "completed" && t.computed_status !== "blocked"; });
+    var skipped = tasks.length - pending.length;
+    if (!pending.length) {
+      App.toast(skipped ? "Nothing to run: blocked and done tasks can't be started." : "Select tasks to run first.", "error");
+      return;
+    }
     $("run-tasklist").innerHTML = pending.map(function (t) {
-      return "<div><code>" + esc(t.project + "/" + t.name) + "</code> " + esc(t.subject) + "</div>";
-    }).join("");
+      return "<li><code>" + esc(t.project + "/" + t.name) + "</code> " + esc(t.subject) + "</li>";
+    }).join("") + (skipped ? '<li class="muted">' + skipped + " blocked or done task" + (skipped === 1 ? "" : "s") + " left out</li>" : "");
     updateWarn();
+    returnFocus = document.activeElement;
     $("run-modal").classList.add("open");
+    $("run-perm").focus();
   }
 
-  function closeModal() { $("run-modal").classList.remove("open"); }
+  var returnFocus = null;
+  function closeModal() {
+    $("run-modal").classList.remove("open");
+    if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
+    returnFocus = null;
+  }
 
   function launch() {
     var tasks = pending.map(function (t) { return { project: t.project, id: t.id }; });
@@ -139,7 +152,7 @@
         var prev = runs[r.sessionId];
         if (prev && !prev.done && r.done) {
           finished = true;
-          App.toast("Run " + r.sessionId.slice(0, 8) + (r.exitError ? " exited" : " finished"), r.exitError ? "error" : "ok");
+          App.toast("Run " + r.sessionId.slice(0, 8) + (r.exitError ? " exited with an error." : " finished."), r.exitError ? "error" : undefined);
         }
         merge(r);
       });
@@ -172,7 +185,12 @@
   };
 
   document.addEventListener("DOMContentLoaded", function () {
-    $("run-perm").addEventListener("change", updateWarn);
+    var perm = App.storage.get("agmd-run-mode");
+    $("run-perm").value = PERM_WARN[perm] ? perm : "acceptEdits";
+    $("run-perm").addEventListener("change", function () {
+      App.storage.set("agmd-run-mode", $("run-perm").value);
+      updateWarn();
+    });
     $("run-cancel").addEventListener("click", closeModal);
     $("run-go").addEventListener("click", launch);
     $("run-modal").addEventListener("click", function (e) { if (e.target === e.currentTarget) closeModal(); });

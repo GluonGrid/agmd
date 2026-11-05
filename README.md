@@ -127,14 +127,15 @@ agmd task web --port 8765                 # Serve on a fixed port
 
 `agmd task web` serves a local kanban board over the same task files (no build step, works offline):
 
-- **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status; dragging a claimed task back to Ready releases the claim so it can be handed out again. Done stays done.
-- **Agents at a glance.** Every card shows who holds it: a live agent (green, with its last heartbeat), a stale claim (amber), a Claude run started from the board (purple), or an in-progress task nobody has claimed. Filter the board by claim state, and release a claim from the task panel.
+- **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status. Marking a task done asks first, because Done is final; moving a task a live agent holds back to Ready asks before releasing its claim.
+- **Agents at a glance.** Every card shows who holds it: a live agent (green, with its last heartbeat), a stale claim (amber, with its age), a Claude run started from the board (purple), or an in-progress task nobody has claimed. In progress lists stuck work first, and blocked cards name the task they wait on and flag it when that task is stuck.
+- **What needs you.** The header counts open, working, needing-attention and blocked tasks; click a count to filter by it. Projects with stuck work carry an amber badge in the sidebar. The task panel offers one-click Re-queue for in-progress tasks nobody holds, and Release and re-queue for stale claims.
 - **Manage tasks.** Create tasks (`n`), edit title, status, priority, type, feature, dependencies and description in the side panel, comment, and delete. Each field saves on its own, so an agent's concurrent change to another field is kept.
-- **Projects** are listed in the sidebar with their open counts, plus an All projects view. Filter with `/`.
-- **Live.** Changes made by agents through the CLI show up within a couple of seconds.
+- **Keyboard.** `j`/`k`/`h`/`l` or the arrow keys move between cards, Enter opens one, `x` selects it for a run, `/` filters, `n` creates, Esc closes. Filters and the selected project live in the URL.
+- **Live.** Changes made by agents through the CLI show up within a couple of seconds; if the agmd server stops, the board says so instead of showing stale data as live.
 - **Light and dark** themes follow the system, or pick one in the sidebar.
 
-The board can also **run tasks with Claude Code**: select cards (shift-click or the corner checkbox) or open one, click ▶ Run, and pick a permission mode. agmd starts a `claude` session with a `/goal` prompt, moves the tasks to in progress and claims them as workflow `web-<session-id>` (kept alive while the run is going). The run's transcript streams into a console, and every run stays available from **Runs** in the sidebar, with a `claude --resume <id>` command to continue it.
+The board can also **run tasks with Claude Code**: select cards (shift-click, `x`, or the corner checkbox) or open one, click Run, and pick a permission mode (it starts on `acceptEdits` and remembers your last choice; blocked and done tasks are left out). agmd starts a `claude` session with a `/goal` prompt, moves the tasks to in progress and claims them as workflow `web-<session-id>` (kept alive while the run is going). The run's transcript streams into a console, and every run stays available from **Runs** in the sidebar, with a `claude --resume <id>` command to continue it.
 
 The server binds to `127.0.0.1` and refuses requests from other sites (foreign `Origin` or non-IP `Host`), since it can start processes that modify your files.
 
