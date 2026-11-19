@@ -35,6 +35,7 @@ agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
 agmd task new add-dark-mode -t feature -p 1 --content "Add dark mode"
 agmd task new create-api --content "Create endpoints" --blocked-by "setup-db"
 agmd task new setup-db --feature auth     # Scope task to a feature
+agmd task new merge-pr --human --content "Merge PR #12"   # A step only you can do
 
 # List tasks (auto-sorted: P0→P4, then ready → blocked → completed)
 agmd task list                            # All tasks for current project
@@ -43,10 +44,13 @@ agmd task list --feature auth             # Filter by feature
 agmd task list --status ready             # Filter by computed status
 agmd task list --tree                     # Show dependency tree
 agmd task list --all                      # Include completed tasks
+agmd task list --human                    # Only tasks for the human (--no-human hides them)
 
 # Manage status and dependencies
 agmd task status setup-db completed       # Update status
 agmd task edit setup-db --priority 0 --type bug  # Change priority/type
+agmd task edit setup-db --feature auth    # Change the feature (--feature "" clears it)
+agmd task edit merge-pr --human           # Mark for the human (--human=false hands it back)
 agmd task blocked-by create-api setup-db  # Add dependency
 agmd task unblock create-api setup-db     # Remove dependency
 
@@ -59,6 +63,18 @@ agmd task clean                           # Delete all completed tasks
 
 **Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
 **Task types:** bug, feature, task (default, hidden), chore
+
+### Human tasks
+
+Some steps only you can do: merge a pull request, log in somewhere, run a root command, make a decision. Create them with `--human` on the same board. Agents are never handed a human task: `task next` and `next --claim` skip it (if only human tasks are ready, the answer is `not_found`), and `task assign` refuses it with `conflict`, even with `--force`. The list shows a `[human]` tag, `task show` a `for: human` line, and JSON output carries `"human": true`.
+
+To make agent work wait for you, block it on the human task. Completing the human task releases it as usual:
+
+```bash
+agmd task new merge-pr --human -p 0 --content "Merge PR #12"
+agmd task new deploy --blocked-by merge-pr --content "Deploy after the merge"
+agmd task status merge-pr completed       # deploy becomes ready for agents
+```
 
 Tasks are auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Dependencies via `--blocked-by` are validated on creation.
 
@@ -81,7 +97,7 @@ agmd task status setup-db completed                   # Finish it
 agmd task unassign setup-db                           # Release the claim (back to pending if unfinished)
 ```
 
-`next --claim` atomically picks the highest-priority task that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
+`next --claim` atomically picks the highest-priority agent task (never a [human task](#human-tasks)) that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
 
 ### Stale claims
 
@@ -107,7 +123,7 @@ Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"err
 | `not_found` | 3 | No such task, or nothing ready for `next` |
 | `project_mismatch` | 4 | Task reference names another project |
 | `invalid_transition` | 5 | Status change not allowed |
-| `conflict` | 6 | Task already assigned to another workflow (`assign --force` takes it over) |
+| `conflict` | 6 | Task already assigned to another workflow (`assign --force` takes it over), or a task for the human |
 
 ```bash
 agmd task list --json --status ready
@@ -130,6 +146,7 @@ agmd task web --port 8765                 # Serve on a fixed port
 - **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status. Marking a task done asks first, because Done is final; moving a task a live agent holds back to Ready asks before releasing its claim.
 - **Agents at a glance.** Every card shows who holds it: a live agent (green, with its last heartbeat), a stale claim (amber, with its age), a Claude run started from the board (purple), or an in-progress task nobody has claimed. In progress lists stuck work first, and blocked cards name the task they wait on and flag it when that task is stuck.
 - **What needs you.** The header counts open, working, needing-attention and blocked tasks; click a count to filter by it. Projects with stuck work carry an amber badge in the sidebar. The task panel offers one-click Re-queue for in-progress tasks nobody holds, and Release and re-queue for stale claims.
+- **Human tasks** carry a blue *human* badge, and the board won't start a Claude run on them.
 - **Manage tasks.** Create tasks (`n`), edit title, status, priority, type, feature, dependencies and description in the side panel, comment, and delete. Each field saves on its own, so an agent's concurrent change to another field is kept.
 - **Keyboard.** `j`/`k`/`h`/`l` or the arrow keys move between cards, Enter opens one, `x` selects it for a run, `/` filters, `n` creates, Esc closes. Filters and the selected project live in the URL.
 - **Live.** Changes made by agents through the CLI show up within a couple of seconds; if the agmd server stops, the board says so instead of showing stale data as live.

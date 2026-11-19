@@ -18,6 +18,12 @@ concurrent processes.
 - `tests/integration/task_concurrency_test.go` runs a built binary as parallel
   subprocesses; add a case there when you add a new mutating command.
 
+## Human Tasks
+
+A task with `human: true` is a step only the human can do. Any code path that
+hands work to an agent (`nextReadyTask`, `heldTask`, `task assign`, web runs)
+must skip or refuse it, inside the same locked step that picks the task.
+
 ## Layout
 
 - `cmd/task.go` — task model, storage, and all `agmd task` subcommands
