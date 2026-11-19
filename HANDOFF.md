@@ -31,6 +31,8 @@ What the branch contains, oldest first:
 | `6395d1e` | Fix: `task show` reported finished dependencies as pending |
 | `171a812` | PRODUCT.md |
 | `c24bafa`, `c466add` | Board fixes from a design critique: stuck-work counts, confirmations, keyboard access, contrast, focus |
+| `dd77da6` | This handoff |
+| `ff68158` | Fix a data race: web server goroutines read a CLI flag global (found by `go test -race`) |
 
 Tests: `go test ./...` passes, including with `-race`. There is no CI; run the tests locally (see [How to build, run and test](#how-to-build-run-and-test)).
 
