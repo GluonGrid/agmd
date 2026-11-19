@@ -258,7 +258,7 @@ func claimTaskForRun(reg *registry.Registry, task *Task, workflowID string) {
 	}
 	defer unlock()
 	current, err := loadTask(task.FilePath)
-	if err != nil || current.Status == "completed" {
+	if err != nil || current.Status == "completed" || current.Human {
 		return
 	}
 	if setTaskStatus(current, "in_progress") != nil || saveTask(current) != nil {
@@ -343,6 +343,12 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 			writeWebError(w, status, code, err.Error())
 			return
 		}
+		if task.Human {
+			h.mu.Unlock()
+			writeWebError(w, http.StatusConflict, "conflict",
+				fmt.Sprintf("task '%s' is for the human: Claude runs can't be started on it", task.Name))
+			return
+		}
 		tasks = append(tasks, task)
 		summaries = append(summaries, runTaskSummary{
 			Project: task.ProjectName,
@@ -412,6 +418,9 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 		StartedAt:      time.Now().UTC().Format(time.RFC3339),
 		cmd:            cmd,
 	}
+	// The response is encoded from a copy: the wait goroutine below writes
+	// info.Done, and a fast-exiting claude would race with the encoder.
+	response := *info
 	h.runMu.Lock()
 	h.runs[sessionID] = info
 	h.runMu.Unlock()
@@ -432,7 +441,7 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 		h.runMu.Unlock()
 	}()
 
-	writeWebJSON(w, http.StatusOK, info)
+	writeWebJSON(w, http.StatusOK, &response)
 }
 
 // runInfoToMap renders the shared (event-free) view of a run.

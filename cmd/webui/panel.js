@@ -121,7 +121,7 @@
     setSelect(q("#p-type"), TYPE_OPTIONS, t.type || "task");
     set(q("#p-feature"), t.feature || "");
     set(q("#p-content"), t.content || "");
-    q("#p-run").classList.toggle("hidden", done || t.computed_status === "blocked");
+    q("#p-run").classList.toggle("hidden", done || t.computed_status === "blocked" || !!t.human);
 
     var pending = t.pending_dependencies || [];
     var stuck = App.stuckBlockers(t);
@@ -153,7 +153,8 @@
     var box = q("#p-claim");
     var detail = "", action = "";
     if (!c) {
-      detail = t.computed_status === "blocked" ? "Unclaimed. Agents can claim it once its dependencies are done."
+      detail = t.human && t.status !== "completed" ? "For you: agents never claim this task. Mark it done when you have finished it."
+        : t.computed_status === "blocked" ? "Unclaimed. Agents can claim it once its dependencies are done."
         : t.status === "completed" ? "Nobody." : "Unclaimed. An agent can pick it up with <code>agmd task next --claim</code>.";
       box.innerHTML = '<p class="claim-detail">' + detail + "</p>";
       return;
