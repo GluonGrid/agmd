@@ -24,7 +24,8 @@ var taskNextCmd = &cobra.Command{
 	Use:   "next",
 	Short: "Show or claim the next ready task",
 	Long: `Show the highest-priority task that is ready (all dependencies completed)
-and not assigned to any workflow.
+and not assigned to any workflow. Tasks for the human (created with --human)
+are never returned.
 
 With --claim, atomically assign that task to --workflow-id and mark it
 in_progress, so parallel agents never pick the same task. If the workflow
@@ -133,7 +134,7 @@ func runTaskNext(cmd *cobra.Command, args []string) error {
 		picked = nextReadyTask(tasks, taskMap, assignments, taskFeature, ttl, now)
 	}
 	if picked == nil {
-		return newTaskError("not_found", "no ready, unassigned task in project '%s'", projectName)
+		return newTaskError("not_found", "no ready, unassigned agent task in project '%s'", projectName)
 	}
 
 	var previous *taskAssignment
@@ -215,12 +216,16 @@ func runTaskNext(cmd *cobra.Command, args []string) error {
 }
 
 // nextReadyTask returns the highest-priority task that is either ready and
-// unassigned, or unfinished with an expired claim.
+// unassigned, or unfinished with an expired claim. Human tasks are never
+// returned.
 func nextReadyTask(tasks []*Task, taskMap map[string]*Task, assignments map[string]taskAssignment, feature string, ttl time.Duration, now time.Time) *Task {
 	if feature != "" {
 		tasks = filterTasksByFeature(tasks, feature)
 	}
 	for _, t := range sortTasksByPriorityAndStatus(tasks, taskMap) {
+		if t.Human {
+			continue
+		}
 		status := computeTaskStatus(t, taskMap)
 		if a, assigned := assignments[t.ID]; assigned {
 			if (status == StatusReady || status == StatusInProgress) && claimIsStale(a, ttl, now) {
@@ -390,11 +395,12 @@ func runTaskHeartbeat(cmd *cobra.Command, args []string) error {
 }
 
 // heldTask returns a workable task already assigned to workflowID, preferring
-// one it has started. Tasks pre-assigned while still blocked are skipped.
+// one it has started. Tasks pre-assigned while still blocked, and human tasks
+// (e.g. marked human after they were claimed), are skipped.
 func heldTask(tasks []*Task, taskMap map[string]*Task, assignments map[string]taskAssignment, workflowID string) *Task {
 	var ready *Task
 	for _, t := range sortTasksByPriorityAndStatus(tasks, taskMap) {
-		if a, ok := assignments[t.ID]; !ok || a.WorkflowID != workflowID {
+		if a, ok := assignments[t.ID]; !ok || a.WorkflowID != workflowID || t.Human {
 			continue
 		}
 		switch computeTaskStatus(t, taskMap) {

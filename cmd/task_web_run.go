@@ -258,7 +258,7 @@ func claimTaskForRun(reg *registry.Registry, task *Task, workflowID string) {
 	}
 	defer unlock()
 	current, err := loadTask(task.FilePath)
-	if err != nil || current.Status == "completed" {
+	if err != nil || current.Status == "completed" || current.Human {
 		return
 	}
 	if setTaskStatus(current, "in_progress") != nil || saveTask(current) != nil {
@@ -341,6 +341,12 @@ func (h *taskWebHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 			h.mu.Unlock()
 			status, code := webErrorStatus(err)
 			writeWebError(w, status, code, err.Error())
+			return
+		}
+		if task.Human {
+			h.mu.Unlock()
+			writeWebError(w, http.StatusConflict, "conflict",
+				fmt.Sprintf("task '%s' is for the human: Claude runs can't be started on it", task.Name))
 			return
 		}
 		tasks = append(tasks, task)

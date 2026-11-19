@@ -30,6 +30,7 @@ type Task struct {
 	Type        string   `yaml:"type,omitempty"`     // bug, feature, task, chore
 	Feature     string   `yaml:"feature,omitempty"`
 	DependsOn   []string `yaml:"depends_on"`
+	Human       bool     `yaml:"human,omitempty"` // a step only the human can do; never handed to agents
 	Content     string   `yaml:"-"`
 	FilePath    string   `yaml:"-"`
 	ProjectName string   `yaml:"-"`
@@ -80,6 +81,8 @@ var taskFilterType string
 var taskWorkflowID string
 var taskWorktreePath string
 var taskUnassignAll bool
+var taskHuman bool
+var taskNoHuman bool
 
 type taskAssignment struct {
 	TaskID       string `json:"task_id"`
@@ -333,16 +336,21 @@ Examples:
 
 var taskEditCmd = &cobra.Command{
 	Use:   "edit <task-id-or-name>",
-	Short: "Edit task priority or type",
-	Long: `Edit a task's priority or type.
+	Short: "Edit task priority, type, feature or human flag",
+	Long: `Edit a task's priority, type, feature or human flag.
 
 Use -p/--priority to change priority (0-4 or P0-P4).
 Use -t/--type to change type (bug, feature, task, chore).
+Use --feature to change the feature (--feature "" clears it).
+Use --human to mark a task for the human (agents never claim it);
+--human=false hands it back to agents.
 
 Examples:
   agmd task edit setup-db -p 0              # Set to critical priority
   agmd task edit setup-db -t bug            # Change type to bug
-  agmd task edit setup-db -p 1 -t feature   # Change both`,
+  agmd task edit setup-db -p 1 -t feature   # Change both
+  agmd task edit merge-pr --human           # Only the human can do this
+  agmd task edit setup-db --feature ""      # Clear the feature`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTaskName,
 	RunE:              runTaskEdit,
@@ -406,6 +414,8 @@ func init() {
 	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization")
 	taskListCmd.Flags().StringVarP(&taskFilterPriority, "priority", "p", "", "Filter by priority (0-4 or P0-P4)")
 	taskListCmd.Flags().StringVarP(&taskFilterType, "type", "t", "", "Filter by type (bug, feature, task, chore)")
+	taskListCmd.Flags().BoolVar(&taskHuman, "human", false, "Only show tasks for the human")
+	taskListCmd.Flags().BoolVar(&taskNoHuman, "no-human", false, "Hide tasks for the human")
 	taskListCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskListCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -417,6 +427,7 @@ func init() {
 	taskNewCmd.Flags().BoolVar(&taskNoEditor, "no-editor", false, "Don't open editor after creating")
 	taskNewCmd.Flags().IntVarP(&taskPriority, "priority", "p", 2, "Priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
 	taskNewCmd.Flags().StringVarP(&taskType, "type", "t", "task", "Type (bug, feature, task, chore)")
+	taskNewCmd.Flags().BoolVar(&taskHuman, "human", false, "A step only the human can do; agents never claim it")
 	taskNewCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskNewCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -441,6 +452,8 @@ func init() {
 	taskEditCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskEditCmd.Flags().IntVarP(&taskEditPriority, "priority", "p", -1, "New priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
 	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
+	taskEditCmd.Flags().StringVar(&taskFeature, "feature", "", "New feature (empty string clears it)")
+	taskEditCmd.Flags().BoolVar(&taskHuman, "human", false, "Mark as a task for the human (--human=false clears it)")
 	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -556,6 +569,7 @@ type taskJSONItem struct {
 	Priority            int             `json:"priority"`
 	Type                string          `json:"type"`
 	Feature             string          `json:"feature,omitempty"`
+	Human               bool            `json:"human,omitempty"`
 	DependsOn           []string        `json:"depends_on"`
 	PendingDependencies []string        `json:"pending_dependencies,omitempty"`
 	Assignment          *taskAssignment `json:"assignment,omitempty"`
@@ -601,6 +615,7 @@ func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string
 		Priority:       task.Priority,
 		Type:           taskType,
 		Feature:        task.Feature,
+		Human:          task.Human,
 		DependsOn:      task.DependsOn,
 	}
 	if status == StatusBlocked {
@@ -960,6 +975,17 @@ func getPendingDependencies(task *Task, allTasks map[string]*Task) []string {
 	return pending
 }
 
+// filterTasksByHuman keeps only human tasks (human=true) or only agent tasks.
+func filterTasksByHuman(tasks []*Task, human bool) []*Task {
+	var filtered []*Task
+	for _, t := range tasks {
+		if t.Human == human {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
 // filterTasksByFeature returns only tasks matching the given feature
 func filterTasksByFeature(tasks []*Task, feature string) []*Task {
 	var filtered []*Task
@@ -983,6 +1009,14 @@ func parsePriority(s string) (int, error) {
 		return int(s[0] - '0'), nil
 	}
 	return 0, fmt.Errorf("invalid priority '%s'. Use 0-4 or P0-P4", s)
+}
+
+// humanTag marks a task only the human can do in plain-text lists.
+func humanTag(t *Task) string {
+	if !t.Human {
+		return ""
+	}
+	return " " + color.New(color.FgCyan).Sprint("[human]")
 }
 
 // formatPriorityType returns a colored "P0:bug" style tag
@@ -1117,6 +1151,7 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		if prioType != "" {
 			prioType = " " + prioType
 		}
+		prioType += humanTag(t)
 
 		if isRoot {
 			fmt.Printf("  %s%s %s\n", indicator, prioType, t.Name)
@@ -1350,6 +1385,7 @@ func printTasksGroupedByFeature(tasks []*Task, taskMap map[string]*Task, showAll
 			if prioType != "" {
 				prioType = " " + prioType
 			}
+			prioType += humanTag(t)
 
 			// Indent if under a feature group
 			indent := ""
@@ -1410,9 +1446,16 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load assignments: %w", err)
 	}
 
+	if taskHuman && taskNoHuman {
+		return newTaskError("invalid_input", "cannot use --human with --no-human")
+	}
+
 	// Filter by feature if specified
 	if taskFeature != "" {
 		tasks = filterTasksByFeature(tasks, taskFeature)
+	}
+	if taskHuman || taskNoHuman {
+		tasks = filterTasksByHuman(tasks, taskHuman)
 	}
 
 	if len(tasks) == 0 {
@@ -1576,6 +1619,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		if prioType != "" {
 			prioType = " " + prioType
 		}
+		prioType += humanTag(t)
 
 		fmt.Printf("%s%s %s\n", statusBadge, prioType, t.Name)
 
@@ -1639,6 +1683,7 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		Priority:  taskPriority,
 		Type:      taskType,
 		Feature:   taskFeature,
+		Human:     taskHuman,
 		DependsOn: strings.Split(taskBlockedBy, ","),
 	})
 	if err != nil {
@@ -1665,6 +1710,9 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 	}
 	if taskType != "task" {
 		infoMsg += fmt.Sprintf(", %s", taskType)
+	}
+	if taskHuman {
+		infoMsg += ", for: human"
 	}
 	infoMsg += ")"
 	fmt.Println(infoMsg)
@@ -1745,6 +1793,9 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	if task.Feature != "" {
 		fmt.Printf("%s %s\n", dim("feature:"), task.Feature)
 	}
+	if task.Human {
+		fmt.Printf("%s human\n", dim("for:"))
+	}
 	if len(task.DependsOn) > 0 {
 		fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(task.DependsOn, ", "))
 	}
@@ -1822,6 +1873,9 @@ func runTaskShowAll(reg *registry.Registry) error {
 		}
 		if t.Feature != "" {
 			fmt.Printf("%s %s\n", dim("feature:"), t.Feature)
+		}
+		if t.Human {
+			fmt.Printf("%s human\n", dim("for:"))
 		}
 		if len(t.DependsOn) > 0 {
 			fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(t.DependsOn, ", "))
@@ -1952,9 +2006,12 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 
 	taskArg := args[0]
 
+	featureSet := cmd.Flags().Changed("feature")
+	humanSet := cmd.Flags().Changed("human")
+
 	// Check if at least one flag is provided
-	if taskEditPriority == -1 && taskEditType == "" {
-		return newTaskError("invalid_input", "specify at least one of --priority or --type")
+	if taskEditPriority == -1 && taskEditType == "" && !featureSet && !humanSet {
+		return newTaskError("invalid_input", "specify at least one of --priority, --type, --feature or --human")
 	}
 
 	// Validate priority if provided
@@ -2009,6 +2066,21 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 		changes = append(changes, fmt.Sprintf("type %s → %s", oldType, taskEditType))
 	}
 
+	if featureSet {
+		newFeature := strings.TrimSpace(taskFeature)
+		changes = append(changes, fmt.Sprintf("feature %s → %s", featureLabel(task.Feature), featureLabel(newFeature)))
+		task.Feature = newFeature
+	}
+
+	if humanSet {
+		task.Human = taskHuman
+		if taskHuman {
+			changes = append(changes, "for: human")
+		} else {
+			changes = append(changes, "for: agents")
+		}
+	}
+
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
 	}
@@ -2026,6 +2098,14 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Updated task '%s': %s\n", green("✓"), taskName, strings.Join(changes, ", "))
 	return nil
+}
+
+// featureLabel names a feature in edit messages; an empty one reads "none".
+func featureLabel(feature string) string {
+	if feature == "" {
+		return "none"
+	}
+	return feature
 }
 
 func runTaskDelete(cmd *cobra.Command, args []string) error {
@@ -2349,6 +2429,10 @@ func runTaskAssign(cmd *cobra.Command, args []string) error {
 	task, err := resolveTaskRef(reg, projectName, taskRef)
 	if err != nil {
 		return err
+	}
+
+	if task.Human {
+		return newTaskError("conflict", "task '%s' is for the human: agents can't be assigned to it", task.Name)
 	}
 
 	assignments, err := loadTaskAssignments(reg, projectName)

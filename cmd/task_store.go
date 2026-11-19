@@ -39,6 +39,7 @@ func encodeTask(task *Task) ([]byte, error) {
 		Type      string   `yaml:"type,omitempty"`
 		Feature   string   `yaml:"feature,omitempty"`
 		DependsOn []string `yaml:"depends_on"`
+		Human     bool     `yaml:"human,omitempty"`
 	}{
 		ID:        task.ID,
 		Subject:   task.Subject,
@@ -47,6 +48,7 @@ func encodeTask(task *Task) ([]byte, error) {
 		Type:      task.Type,
 		Feature:   task.Feature,
 		DependsOn: task.DependsOn,
+		Human:     task.Human,
 	}
 	if frontmatter.DependsOn == nil {
 		frontmatter.DependsOn = []string{}
@@ -68,6 +70,7 @@ type newTaskSpec struct {
 	Priority  int
 	Type      string
 	Feature   string
+	Human     bool     // a step only the human can do
 	DependsOn []string // task names or ids in the same project
 }
 
@@ -110,6 +113,7 @@ func createTask(reg *registry.Registry, projectName string, spec newTaskSpec) (*
 		Priority:    spec.Priority,
 		Type:        spec.Type,
 		Feature:     strings.TrimSpace(spec.Feature),
+		Human:       spec.Human,
 		DependsOn:   dependsOn,
 		Content:     strings.TrimSpace(spec.Content),
 		FilePath:    filepath.Join(taskDir, spec.Name+".md"),

@@ -126,6 +126,57 @@ func TestTaskConcurrency_ClaimNeverHandsOutATaskTwice(t *testing.T) {
 	}
 }
 
+func TestTaskConcurrency_ClaimNeverHandsOutAHumanTask(t *testing.T) {
+	registry := setup(t)
+	const agentTasks, n = 6, 10
+	run(t, "task", "new", "merge-pr", "--project", "p", "--human", "-p", "0", "--content", "Only the human can merge")
+	for i := 0; i < agentTasks; i++ {
+		run(t, "task", "new", fmt.Sprintf("t%02d", i), "--project", "p", "-p", "3", "--content", "work")
+	}
+
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"task", "next", "--claim", "--workflow-id", fmt.Sprintf("agent-%d", i), "--project", "p", "--json"}
+	})
+
+	claimed := map[string]int{}
+	notFound := 0
+	for i, r := range results {
+		if r.err != nil {
+			if exitErr, ok := r.err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+				notFound++
+				continue
+			}
+			t.Fatalf("agent-%d failed: %v", i, r.err)
+		}
+		var payload struct {
+			Task struct {
+				Name  string `json:"name"`
+				Human bool   `json:"human"`
+			} `json:"task"`
+		}
+		if err := json.Unmarshal(r.stdout, &payload); err != nil {
+			t.Fatalf("agent-%d output is not JSON: %v\n%s", i, err, r.stdout)
+		}
+		if payload.Task.Name == "merge-pr" || payload.Task.Human {
+			t.Errorf("agent-%d was handed the human task", i)
+		}
+		claimed[payload.Task.Name]++
+	}
+	if len(claimed) != agentTasks || notFound != n-agentTasks {
+		t.Errorf("claimed %d distinct tasks with %d not_found, want %d and %d: %v", len(claimed), notFound, agentTasks, n-agentTasks, claimed)
+	}
+	for name, count := range claimed {
+		if count != 1 {
+			t.Errorf("task %s claimed %d times", name, count)
+		}
+	}
+	for _, a := range readAssignments(t, registry, "p") {
+		if a["task_name"] == "merge-pr" {
+			t.Errorf("assignments.json holds the human task: %v", a)
+		}
+	}
+}
+
 func TestTaskConcurrency_ParallelAssignsAreNotLost(t *testing.T) {
 	registry := setup(t)
 	const n = 12
