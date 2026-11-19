@@ -42,6 +42,7 @@
     bug: '<rect x="5" y="4.5" width="6" height="8.5" rx="3"/><path d="M8 7v6M2.5 8.5H5M11 8.5h2.5M3 4.5l2 1.5M13 4.5l-2 1.5M3.5 13l1.6-1.2M12.5 13l-1.6-1.2"/>',
     sparkle: '<path d="M8 2.5 9.3 6.7 13.5 8l-4.2 1.3L8 13.5 6.7 9.3 2.5 8l4.2-1.3z"/>',
     broom: '<path d="M10.5 2.5 7.5 8M5 8.5h5l1 5H4z"/>',
+    person: '<circle cx="8" cy="5.2" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/>',
     hash: '<path d="M6 2.5 5 13.5M11 2.5l-1 11M2.5 6h11M2 10h11"/>',
     logo: '<rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M6.5 2.5v11"/>'
   };

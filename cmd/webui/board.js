@@ -116,6 +116,7 @@
 
   App.tagsHTML = function (t, withProject) {
     var tags = [];
+    if (t.human) tags.push('<span class="tag human" title="For the human: agents never claim it">' + icon("person") + "human</span>");
     if (t.priority !== 2) tags.push('<span class="tag prio p' + t.priority + '" title="Priority ' + t.priority + '">P' + t.priority + "</span>");
     if (t.type === "bug") tags.push('<span class="tag">' + icon("bug") + "bug</span>");
     else if (t.type && t.type !== "task") tags.push('<span class="tag">' + esc(t.type) + "</span>");
