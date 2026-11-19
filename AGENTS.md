@@ -89,3 +89,8 @@ These commands prompt for confirmation; always pass --force in tests:
 - `task.go`: priority was omitted from YAML when == 2 (default), causing P2 tasks
   to be read back as P0. Always write the priority field.
 - `fileExists` must use os.Lstat, not os.Stat, so dangling symlinks are seen.
+- Web server code (handlers and their goroutines) must not read CLI flag
+  variables such as `taskStaleAfter`: they are package globals that the
+  running command owns, and the in-process tests reset them while the server
+  is still running. Use `envClaimTTL()` there, not `claimTTL()`. Run
+  `go test -race ./...` before pushing; this race only showed up under `-race`.

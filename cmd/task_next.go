@@ -238,7 +238,18 @@ func nextReadyTask(tasks []*Task, taskMap map[string]*Task, assignments map[stri
 // claimTTL resolves --stale-after, then $AGMD_CLAIM_TTL, then the default.
 // Zero disables expiry.
 func claimTTL() (time.Duration, error) {
-	raw := strings.TrimSpace(taskStaleAfter)
+	return resolveClaimTTL(taskStaleAfter)
+}
+
+// envClaimTTL is claimTTL without the --stale-after flag. The web server uses
+// it: its goroutines must not read CLI flag variables, which belong to
+// whichever command is running.
+func envClaimTTL() (time.Duration, error) {
+	return resolveClaimTTL("")
+}
+
+func resolveClaimTTL(flagValue string) (time.Duration, error) {
+	raw := strings.TrimSpace(flagValue)
 	source := "--stale-after"
 	if raw == "" {
 		raw, source = strings.TrimSpace(os.Getenv("AGMD_CLAIM_TTL")), "AGMD_CLAIM_TTL"

@@ -136,7 +136,7 @@ func loadWebState(reg *registry.Registry, currentProject string) (webStatePayloa
 		Tasks:          []taskJSONItem{},
 	}
 
-	ttl, err := claimTTL()
+	ttl, err := envClaimTTL()
 	if err != nil {
 		return state, err
 	}

@@ -282,7 +282,7 @@ func claimTaskForRun(reg *registry.Registry, task *Task, workflowID string) {
 
 // heartbeatRun keeps a run's claims alive until done is closed.
 func heartbeatRun(reg *registry.Registry, projects []string, workflowID string, done <-chan struct{}) {
-	ttl, err := claimTTL()
+	ttl, err := envClaimTTL()
 	if err != nil || ttl <= 0 {
 		return
 	}
