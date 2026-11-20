@@ -37,13 +37,12 @@ func runE(t *testing.T, args ...string) (string, error) {
 	return buf.String(), err
 }
 
-// setup runs agmd setup into a fresh registry and sets AGMD_HOME for this test.
+// setup points AGMD_HOME at a fresh, not-yet-created data directory for this test.
 // Returns the registry path.
 func setup(t *testing.T) string {
 	t.Helper()
 	registry := filepath.Join(t.TempDir(), "registry")
 	t.Setenv("AGMD_HOME", registry)
-	run(t, "setup")
 	return registry
 }
 
@@ -77,4 +76,12 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("readFile %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// writeFile writes content to path, fatal on error.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writeFile %s: %v", path, err)
+	}
 }

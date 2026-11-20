@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -8,64 +9,52 @@ import (
 	"github.com/spf13/pflag"
 )
 
+type codedError interface {
+	error
+	ErrorCode() string
+	ExitStatus() int
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "agmd",
-	Short: "Manage AI agent instructions across all your projects",
-	Long: `agmd - Agent Markdown
+	Short: "A task board for you and your coding agents",
+	Long: `agmd - a task board for you and your coding agents, driven from the CLI.
 
-Stop copy-pasting AI instructions between projects. agmd lets you maintain
-a personal registry of rules, workflows, and guidelines that you can mix
-and match across any project.
-
-How it works:
-  1. Store reusable instructions in ~/.agmd/ (your personal registry)
-  2. Reference them in directives.md with simple directives
-  3. Optionally add directives.local.md for personal/machine-specific overrides
-  4. Run 'agmd sync' to generate AGENTS.md for AI agents
-
-Example directives.md:
-  :::use rule:typescript
-  :::use workflow:commit
-  :::list
-  guideline:code-style
-  guideline:documentation
-  :::end
-  :::skills                  # auto-detect .claude/skills or .agents/skills
-  :::docs                    # list symlinked documentation in ./docs/
-
-Benefits:
-  • One source of truth for your coding standards
-  • Update once, sync everywhere
-  • Share rules across teams via profiles
-  • Works with Claude, Cursor, Windsurf, and any AI coding assistant
+Tasks are markdown files under ~/.agmd/task/<project>/ (override with AGMD_HOME).
+The project is derived from the repository you run agmd in; Git worktrees
+resolve to their main repository, so parallel agents share one task list.
 
 Get started:
-  agmd setup    # Initialize your registry
-  agmd init     # Create directives.md in your project
-  agmd sync     # Generate AGENTS.md
+  agmd task new setup-db --content "Set up the database"
+  agmd task list
+  agmd task web
 
-Special subcommands:
-  agmd task     # Manage project tasks with dependencies
-  agmd file     # Manage raw files (scripts, configs)
-  agmd doc      # Manage documentation folders
-  agmd skill    # Manage Agent Skills (install, link, list)
-
-Agent Skills:
-  agmd skill install owner/repo   # install from GitHub
-  agmd skill link my-skill        # symlink into agent dirs
-  agmd skill list                 # list installed skills
-
-Sync across devices:
-  agmd git init
-  agmd git remote add origin <url>
-  agmd git add -A && agmd git commit -m "sync" && agmd git push
-  git clone <url> ~/.agmd   # on a new machine`,
+Run 'agmd task --help' for every task command.`,
 	Version: "0.1.0",
 }
 
 // Execute runs the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		if coded, ok := err.(codedError); ok {
+			if taskJSON {
+				payload := map[string]interface{}{
+					"error": map[string]string{
+						"code":    coded.ErrorCode(),
+						"message": coded.Error(),
+					},
+				}
+				encoded, marshalErr := json.Marshal(payload)
+				if marshalErr == nil {
+					fmt.Fprintln(os.Stderr, string(encoded))
+				} else {
+					fmt.Fprintln(os.Stderr, err)
+				}
+			} else {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			os.Exit(coded.ExitStatus())
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

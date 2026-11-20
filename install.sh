@@ -164,9 +164,9 @@ main() {
     success "Installation complete!"
     echo ""
     echo "Get started:"
-    echo "  agmd setup    # Initialize your registry"
-    echo "  agmd init     # Create directives.md in a project"
-    echo "  agmd --help   # See all commands"
+    echo "  agmd task new my-task --content \"Describe it\"   # Create a task in this repo"
+    echo "  agmd task list                                     # List tasks"
+    echo "  agmd task web                                      # Open the web board"
     echo ""
 }
 
