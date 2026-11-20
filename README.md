@@ -45,9 +45,12 @@ agmd task list --status ready             # Filter by computed status
 agmd task list --tree                     # Show dependency tree
 agmd task list --all                      # Include completed tasks
 agmd task list --human                    # Only tasks for the human (--no-human hides them)
+agmd task list --sort age                 # Oldest-created first (default: --sort priority)
 
 # Manage status and dependencies
 agmd task status setup-db completed       # Update status
+agmd task status merge-pr completed --hold 2m   # Done now, releases dependents in 2 minutes
+agmd task reopen merge-pr                 # Undo a completion nothing was built on yet
 agmd task edit setup-db --priority 0 --type bug  # Change priority/type
 agmd task edit setup-db --feature auth    # Change the feature (--feature "" clears it)
 agmd task edit merge-pr --human           # Mark for the human (--human=false hands it back)
@@ -74,6 +77,17 @@ To make agent work wait for you, block it on the human task. Completing the huma
 agmd task new merge-pr --human -p 0 --content "Merge PR #12"
 agmd task new deploy --blocked-by merge-pr --content "Deploy after the merge"
 agmd task status merge-pr completed       # deploy becomes ready for agents
+```
+
+### Undoing a completion
+
+A completed task can't change status again, but it isn't final until something was built on it. `agmd task reopen <task>` puts it back to pending as long as no task that depends on it is claimed, in progress or completed; dependents that were only ready become blocked again. Otherwise it fails with `conflict`, naming the dependent. Chains follow from this: if completing `a` released `b` and `b` is completed, `a` can no longer be reopened. The reopen is recorded as a comment (`--author`, else `$AGMD_AUTHOR`, else `user`). Reopen is meant for the human (for example a mis-tap in an app); agents should not reopen tasks they did not complete.
+
+To leave room for an undo, complete with `--hold <duration>` (for example `10s` or `2m`, at most `1h`). The task is completed at once, but its dependents stay blocked, and no agent can claim them, until the hold has passed (rounded up to the second); a reopen during the hold always succeeds. There is no timer: every reader compares the time when it looks. `task show` notes `counts from HH:MM:SS` and JSON output carries `hold_until` while the hold runs.
+
+```bash
+agmd task status merge-pr completed --hold 2m
+agmd task reopen merge-pr --author app    # within 2 minutes: nobody has started deploy
 ```
 
 Tasks are auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Dependencies via `--blocked-by` are validated on creation.
@@ -122,8 +136,8 @@ Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"err
 | `invalid_input` | 2 | Bad arguments |
 | `not_found` | 3 | No such task, or nothing ready for `next` |
 | `project_mismatch` | 4 | Task reference names another project |
-| `invalid_transition` | 5 | Status change not allowed |
-| `conflict` | 6 | Task already assigned to another workflow (`assign --force` takes it over), or a task for the human |
+| `invalid_transition` | 5 | Status change not allowed (leaving completed other than by `reopen`, or reopening a task that isn't completed) |
+| `conflict` | 6 | Task already assigned to another workflow (`assign --force` takes it over), a task for the human, or a reopen refused because a dependent was already claimed, started or completed |
 
 ```bash
 agmd task list --json --status ready
@@ -143,7 +157,7 @@ agmd task web --port 8765                 # Serve on a fixed port
 
 `agmd task web` serves a local kanban board over the same task files (no build step, works offline):
 
-- **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status. Marking a task done asks first, because Done is final; moving a task a live agent holds back to Ready asks before releasing its claim.
+- **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status. Marking a task done asks first, because the board can't undo it (`agmd task reopen` can, until something was built on it); moving a task a live agent holds back to Ready asks before releasing its claim.
 - **Agents at a glance.** Every card shows who holds it: a live agent (green, with its last heartbeat), a stale claim (amber, with its age), a Claude run started from the board (purple), or an in-progress task nobody has claimed. In progress lists stuck work first, and blocked cards name the task they wait on and flag it when that task is stuck.
 - **What needs you.** The header counts open, working, needing-attention and blocked tasks; click a count to filter by it. Projects with stuck work carry an amber badge in the sidebar. The task panel offers one-click Re-queue for in-progress tasks nobody holds, and Release and re-queue for stale claims.
 - **Human tasks** carry a blue *human* badge, and the board won't start a Claude run on them.
@@ -158,7 +172,7 @@ The server binds to `127.0.0.1` and refuses requests from other sites (foreign `
 
 ## Storage
 
-Each task is a markdown file with YAML frontmatter at `~/.agmd/task/<project>/<name>.md`. Claims live in `<project>/assignments.json` and comments in `<project>/comments/<task-id>.json`. Set `AGMD_HOME` to use another directory. Because tasks are plain files, you can version `~/.agmd` with git to carry it between machines.
+Each task is a markdown file with YAML frontmatter at `~/.agmd/task/<project>/<name>.md`. The frontmatter carries `created_at`, `updated_at` and `completed_at` (RFC 3339, UTC; tasks created before these existed simply lack them), and `completion_counts_at` for a completion with `--hold`. Claims live in `<project>/assignments.json` and comments in `<project>/comments/<task-id>.json`. Set `AGMD_HOME` to use another directory. Because tasks are plain files, you can version `~/.agmd` with git to carry it between machines.
 
 ## Installation
 

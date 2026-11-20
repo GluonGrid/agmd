@@ -43,9 +43,9 @@ Success means agents working in parallel never collide or pick up blocked work, 
 
 ## Capabilities and Constraints
 
-- Statuses are `pending`, `in_progress` and `completed`; the board shows computed columns Blocked, Ready, In progress and Done. Completed is final and cannot be reopened.
+- Statuses are `pending`, `in_progress` and `completed`; the board shows computed columns Blocked, Ready, In progress and Done. Completed is final once something was built on it: `task reopen` undoes a completion while no dependent is claimed, started or completed, and a completion can be held (up to 1h) before it releases dependents.
 - Claims belong to a workflow id; a claim is active, stale (no heartbeat within the TTL, default 2h), held by a board-started run (`web-<session>`), or absent. An in-progress task with no claim is a known state the board must make visible.
-- Tasks carry a name (kebab-case slug), subject, description (Markdown), priority, type (bug, feature, task, chore), feature, dependencies and comments. Tasks do not record created or updated timestamps.
+- Tasks carry a name (kebab-case slug), subject, description (Markdown), priority, type (bug, feature, task, chore), feature, dependencies and comments. Tasks record created, updated and completed timestamps (older tasks may lack them).
 - The CLI cannot edit a task's subject or description after creation; the board can.
 - The board is plain HTML, CSS and JavaScript embedded in the Go binary (`cmd/webui/`), with no build step and no external requests. It must keep working offline.
 - Several projects can exist; the board has an all-projects view.
