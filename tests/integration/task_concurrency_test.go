@@ -234,3 +234,69 @@ func TestTaskJSONErrorIsOneLineOnStderr(t *testing.T) {
 		t.Errorf("stderr should be exactly one JSON error line, got:\n%s", got)
 	}
 }
+
+// A reopen racing parallel claims of its dependent: either the reopen wins
+// and nobody gets the dependent, or one claim wins and the reopen is refused.
+func TestTaskConcurrency_ReopenRacesClaimOfDependent(t *testing.T) {
+	setup(t)
+	const rounds = 12
+	reopenWins, claimWins := 0, 0
+	for round := 0; round < rounds; round++ {
+		claimers := 1 + round%4 // fewer rivals in some rounds, so the reopen wins some
+		project := fmt.Sprintf("p%d", round)
+		// a is the human's step (ticked in the app); b is the only agent task.
+		run(t, "task", "new", "a", "--project", project, "--human", "--content", "first")
+		run(t, "task", "new", "b", "--project", project, "--blocked-by", "a", "--content", "second")
+		run(t, "task", "status", "a", "completed", "--project", project)
+
+		// Process 0 reopens, the rest claim; all start at once, and several
+		// rounds let scheduling produce both orderings.
+		results := runParallel(t, claimers+1, func(i int) []string {
+			if i == 0 {
+				return []string{"task", "reopen", "a", "--project", project, "--json"}
+			}
+			return []string{"task", "next", "--claim", "--workflow-id", fmt.Sprintf("agent-%d", i), "--project", project, "--json"}
+		})
+
+		exitCode := func(err error) int {
+			if err == nil {
+				return 0
+			}
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				return exitErr.ExitCode()
+			}
+			t.Fatalf("round %d: %v", round, err)
+			return -1
+		}
+		reopened := false
+		switch code := exitCode(results[0].err); code {
+		case 0:
+			reopened = true
+		case 6:
+		default:
+			t.Fatalf("round %d: reopen exit %d, want 0 or 6", round, code)
+		}
+		claims := 0
+		for i := 1; i <= claimers; i++ {
+			switch code := exitCode(results[i].err); code {
+			case 0:
+				if !strings.Contains(string(results[i].stdout), `"name":"b"`) {
+					t.Errorf("round %d: agent-%d claimed something else: %s", round, i, results[i].stdout)
+				}
+				claims++
+			case 3:
+			default:
+				t.Fatalf("round %d: agent-%d exit %d", round, i, code)
+			}
+		}
+		switch {
+		case reopened && claims == 0:
+			reopenWins++
+		case !reopened && claims == 1:
+			claimWins++
+		default:
+			t.Errorf("round %d: reopened=%v with %d claims of b; want reopen xor one claim", round, reopened, claims)
+		}
+	}
+	t.Logf("reopen won %d rounds, a claim won %d", reopenWins, claimWins)
+}

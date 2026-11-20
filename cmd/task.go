@@ -22,18 +22,27 @@ import (
 
 // Task represents a task with its metadata
 type Task struct {
-	Name        string   `yaml:"-"`
-	ID          string   `yaml:"id,omitempty"`
-	Subject     string   `yaml:"subject"`
-	Status      string   `yaml:"status"`
-	Priority    int      `yaml:"priority,omitempty"` // 0-4 (P0=critical, P4=backlog)
-	Type        string   `yaml:"type,omitempty"`     // bug, feature, task, chore
-	Feature     string   `yaml:"feature,omitempty"`
-	DependsOn   []string `yaml:"depends_on"`
-	Human       bool     `yaml:"human,omitempty"` // a step only the human can do; never handed to agents
-	Content     string   `yaml:"-"`
-	FilePath    string   `yaml:"-"`
-	ProjectName string   `yaml:"-"`
+	Name      string   `yaml:"-"`
+	ID        string   `yaml:"id,omitempty"`
+	Subject   string   `yaml:"subject"`
+	Status    string   `yaml:"status"`
+	Priority  int      `yaml:"priority,omitempty"` // 0-4 (P0=critical, P4=backlog)
+	Type      string   `yaml:"type,omitempty"`     // bug, feature, task, chore
+	Feature   string   `yaml:"feature,omitempty"`
+	DependsOn []string `yaml:"depends_on"`
+	Human     bool     `yaml:"human,omitempty"` // a step only the human can do; never handed to agents
+	// Timestamps are RFC 3339 UTC strings. Tasks written before they existed
+	// have none; leave them empty rather than inventing values.
+	CreatedAt   string `yaml:"created_at,omitempty"`
+	UpdatedAt   string `yaml:"updated_at,omitempty"`
+	CompletedAt string `yaml:"completed_at,omitempty"`
+	// CompletionCountsAt is set by `task status completed --hold`: before
+	// this time the completion does not release dependents (see
+	// dependencySatisfied).
+	CompletionCountsAt string `yaml:"completion_counts_at,omitempty"`
+	Content            string `yaml:"-"`
+	FilePath           string `yaml:"-"`
+	ProjectName        string `yaml:"-"`
 }
 
 // Valid task types
@@ -83,6 +92,7 @@ var taskWorktreePath string
 var taskUnassignAll bool
 var taskHuman bool
 var taskNoHuman bool
+var taskSort string
 
 type taskAssignment struct {
 	TaskID       string `json:"task_id"`
@@ -177,6 +187,7 @@ Subcommands:
   show        Show task content
   delete      Delete a task
   status      Update task status
+  reopen      Undo a completion while nothing was built on it
   blocked-by  Add a dependency
   unblock     Remove a dependency
   next        Show or atomically claim the next ready task
@@ -203,6 +214,7 @@ var taskListCmd = &cobra.Command{
 	Long: `List tasks for the current project, auto-sorted by priority then status.
 
 Tasks are sorted: P0 → P4, then ready → in_progress → blocked → completed.
+Use --sort age to list the oldest-created tasks first instead.
 Completed tasks are hidden by default (use --all to show).
 
 Filters:
@@ -221,6 +233,7 @@ Examples:
   agmd task list --type bug                 # Only bugs
   agmd task list --type bug --priority 0    # Critical bugs only
   agmd task list --tree                     # Show dependency tree
+  agmd task list --sort age                 # Oldest tasks first
   agmd task list --project myproj           # List tasks for specific project`,
 	RunE: runTaskList,
 }
@@ -282,10 +295,16 @@ var taskStatusCmd = &cobra.Command{
 
 Valid statuses: pending, in_progress, completed
 
+A completed task cannot change status again; 'agmd task reopen' undoes a
+completion while nothing was built on it. With --hold (e.g. 10s, 2m, max 1h)
+the task is completed at once, but its dependents stay blocked until the hold
+has passed, so a mis-tap can be reopened before any agent claims them.
+
 Examples:
   agmd task status setup-db pending
   agmd task status setup-db in_progress
-  agmd task status setup-db completed`,
+  agmd task status setup-db completed
+  agmd task status merge-pr completed --hold 2m`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeTaskStatus,
 	RunE:              runTaskStatus,
@@ -416,6 +435,7 @@ func init() {
 	taskListCmd.Flags().StringVarP(&taskFilterType, "type", "t", "", "Filter by type (bug, feature, task, chore)")
 	taskListCmd.Flags().BoolVar(&taskHuman, "human", false, "Only show tasks for the human")
 	taskListCmd.Flags().BoolVar(&taskNoHuman, "no-human", false, "Hide tasks for the human")
+	taskListCmd.Flags().StringVar(&taskSort, "sort", "priority", "Sort order: priority (P0 first, then status) or age (oldest created first)")
 	taskListCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskListCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -572,6 +592,10 @@ type taskJSONItem struct {
 	Human               bool            `json:"human,omitempty"`
 	DependsOn           []string        `json:"depends_on"`
 	PendingDependencies []string        `json:"pending_dependencies,omitempty"`
+	CreatedAt           string          `json:"created_at,omitempty"`
+	UpdatedAt           string          `json:"updated_at,omitempty"`
+	CompletedAt         string          `json:"completed_at,omitempty"`
+	HoldUntil           string          `json:"hold_until,omitempty"`
 	Assignment          *taskAssignment `json:"assignment,omitempty"`
 	Content             string          `json:"content,omitempty"`
 	Comments            []taskComment   `json:"comments,omitempty"`
@@ -597,6 +621,8 @@ type taskMutationJSONPayload struct {
 	Task    string `json:"task,omitempty"`
 	ID      string `json:"id,omitempty"`
 	Status  string `json:"status,omitempty"`
+	// HoldUntil is set when a completion only counts from a later time.
+	HoldUntil string `json:"hold_until,omitempty"`
 }
 
 func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string]taskAssignment, includeContent bool) taskJSONItem {
@@ -617,6 +643,12 @@ func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string
 		Feature:        task.Feature,
 		Human:          task.Human,
 		DependsOn:      task.DependsOn,
+		CreatedAt:      task.CreatedAt,
+		UpdatedAt:      task.UpdatedAt,
+		CompletedAt:    task.CompletedAt,
+	}
+	if until, held := completionHeldUntil(task, taskNow()); held {
+		item.HoldUntil = until.Format(time.RFC3339)
 	}
 	if status == StatusBlocked {
 		item.PendingDependencies = getPendingDependencies(task, taskMap)
@@ -858,8 +890,9 @@ func extractTaskFrontmatter(content []byte) ([]byte, []byte, error) {
 	return frontmatter, body, nil
 }
 
-// saveTask saves a task to file
+// saveTask saves a task to file, stamping updated_at.
 func saveTask(task *Task) error {
+	task.UpdatedAt = taskTimestamp(taskNow())
 	data, err := encodeTask(task)
 	if err != nil {
 		return err
@@ -907,14 +940,10 @@ func computeTaskStatus(task *Task, allTasks map[string]*Task) ComputedStatus {
 		return StatusInProgress
 	}
 
-	// Check if blocked by any pending dependencies
+	// Blocked while any dependency is missing or not yet done.
+	now := taskNow()
 	for _, dep := range task.DependsOn {
-		depTask, exists := allTasks[dep]
-		if !exists {
-			// Dependency doesn't exist, consider it blocking
-			return StatusBlocked
-		}
-		if depTask.Status != "completed" {
+		if !dependencySatisfied(allTasks[dep], now) {
 			return StatusBlocked
 		}
 	}
@@ -963,12 +992,24 @@ func sortTasksByPriorityAndStatus(tasks []*Task, allTasks map[string]*Task) []*T
 	return sorted
 }
 
+// sortTasksByAge orders tasks oldest-created first. Tasks without created_at
+// (written before timestamps existed) keep their order at the end.
+func sortTasksByAge(tasks []*Task) {
+	sort.SliceStable(tasks, func(i, j int) bool {
+		ci, cj := tasks[i].CreatedAt, tasks[j].CreatedAt
+		if ci == "" || cj == "" {
+			return ci != "" && cj == ""
+		}
+		return ci < cj
+	})
+}
+
 // getPendingDependencies returns the list of pending dependencies
 func getPendingDependencies(task *Task, allTasks map[string]*Task) []string {
 	var pending []string
+	now := taskNow()
 	for _, dep := range task.DependsOn {
-		depTask, exists := allTasks[dep]
-		if !exists || depTask.Status != "completed" {
+		if !dependencySatisfied(allTasks[dep], now) {
 			pending = append(pending, dep)
 		}
 	}
@@ -1540,8 +1581,15 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		tasks = filtered
 	}
 
-	// Sort by priority then status
+	// Sort by priority then status, or by age on request
 	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
+	switch strings.ToLower(taskSort) {
+	case "", "priority":
+	case "age":
+		sortTasksByAge(sorted)
+	default:
+		return newTaskError("invalid_input", "invalid --sort '%s'. Use: priority or age", taskSort)
+	}
 	if taskJSON && taskTree {
 		return newTaskError("invalid_input", "cannot use --tree with --json")
 	}
@@ -1782,7 +1830,11 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s %s\n", dim("subject:"), task.Subject)
-	fmt.Printf("%s %s\n", dim("status:"), task.Status)
+	if until, held := completionHeldUntil(task, taskNow()); held {
+		fmt.Printf("%s %s (%s)\n", dim("status:"), task.Status, formatHoldNote(until))
+	} else {
+		fmt.Printf("%s %s\n", dim("status:"), task.Status)
+	}
 	// Always show priority for non-default (P2 is default)
 	if task.Priority != 2 {
 		fmt.Printf("%s P%d\n", dim("priority:"), task.Priority)
@@ -1803,6 +1855,15 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s %s\n", dim("workflow_id:"), assignment.WorkflowID)
 		if assignment.WorktreePath != "" {
 			fmt.Printf("%s %s\n", dim("worktree_path:"), assignment.WorktreePath)
+		}
+	}
+	for _, ts := range []struct{ label, value string }{
+		{"created_at:", task.CreatedAt},
+		{"updated_at:", task.UpdatedAt},
+		{"completed_at:", task.CompletedAt},
+	} {
+		if ts.value != "" {
+			fmt.Printf("%s %s\n", dim(ts.label), ts.value)
 		}
 	}
 	if task.Content != "" {
@@ -2201,6 +2262,10 @@ func setTaskStatus(task *Task, newStatus string) error {
 		)
 	}
 
+	if newStatus == "completed" && task.Status != "completed" {
+		task.CompletedAt = taskTimestamp(taskNow())
+		task.CompletionCountsAt = ""
+	}
 	task.Status = newStatus
 	return nil
 }
@@ -2214,6 +2279,10 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 	// Validate status before touching the registry to preserve CLI behavior.
 	if !validTaskStatuses[newStatus] {
 		return newTaskError("invalid_input", "invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
+	}
+	hold, err := parseCompletionHold(taskHold, newStatus)
+	if err != nil {
+		return err
 	}
 
 	reg, err := registry.New()
@@ -2238,24 +2307,40 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 	}
 	taskName := task.Name
 
+	if hold > 0 && task.Status == "completed" {
+		// Dependents may already have been claimed: a hold now would not undo that.
+		return newTaskError("invalid_transition", "task '%s' is already completed; --hold only applies when completing", taskName)
+	}
 	if err := setTaskStatus(task, newStatus); err != nil {
 		return err
+	}
+	if hold > 0 {
+		applyCompletionHold(task, hold, taskNow())
 	}
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
 	}
+	holdUntil, held := completionHeldUntil(task, taskNow())
 
 	if taskJSON {
-		return printJSON(taskMutationJSONPayload{
+		payload := taskMutationJSONPayload{
 			OK:      true,
 			Action:  "status",
 			Project: projectName,
 			Task:    taskName,
 			ID:      task.ID,
 			Status:  newStatus,
-		})
+		}
+		if held {
+			payload.HoldUntil = holdUntil.Format(time.RFC3339)
+		}
+		return printJSON(payload)
 	}
 
+	if held {
+		fmt.Printf("%s Updated task '%s' status to '%s' (%s)\n", green("✓"), taskName, newStatus, formatHoldNote(holdUntil))
+		return nil
+	}
 	fmt.Printf("%s Updated task '%s' status to '%s'\n", green("✓"), taskName, newStatus)
 	return nil
 }
