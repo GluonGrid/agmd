@@ -40,6 +40,10 @@ func encodeTask(task *Task) ([]byte, error) {
 		Feature   string   `yaml:"feature,omitempty"`
 		DependsOn []string `yaml:"depends_on"`
 		Human     bool     `yaml:"human,omitempty"`
+		Check     string   `yaml:"check,omitempty"`
+
+		ReplacedBy string   `yaml:"replaced_by,omitempty"`
+		Replaces   []string `yaml:"replaces,omitempty"`
 
 		CreatedAt          string `yaml:"created_at,omitempty"`
 		UpdatedAt          string `yaml:"updated_at,omitempty"`
@@ -54,6 +58,10 @@ func encodeTask(task *Task) ([]byte, error) {
 		Feature:   task.Feature,
 		DependsOn: task.DependsOn,
 		Human:     task.Human,
+		Check:     task.Check,
+
+		ReplacedBy: task.ReplacedBy,
+		Replaces:   task.Replaces,
 
 		CreatedAt:          task.CreatedAt,
 		UpdatedAt:          task.UpdatedAt,
@@ -81,6 +89,7 @@ type newTaskSpec struct {
 	Type      string
 	Feature   string
 	Human     bool     // a step only the human can do
+	Check     string   // shell command; exit 0 means the human step is done
 	DependsOn []string // task names or ids in the same project
 }
 
@@ -101,6 +110,9 @@ func createTask(reg *registry.Registry, projectName string, spec newTaskSpec) (*
 	}
 	if !validTaskTypes[spec.Type] {
 		return nil, newTaskError("invalid_input", "invalid type '%s'. Use: bug, feature, task, or chore", spec.Type)
+	}
+	if strings.TrimSpace(spec.Check) != "" && !spec.Human {
+		return nil, newTaskError("invalid_input", "--check only applies to human tasks (add --human)")
 	}
 	dependsOn, err := resolveDependencyNames(reg, projectName, spec.Name, spec.DependsOn)
 	if err != nil {
@@ -127,6 +139,7 @@ func createTask(reg *registry.Registry, projectName string, spec newTaskSpec) (*
 		Type:        spec.Type,
 		Feature:     strings.TrimSpace(spec.Feature),
 		Human:       spec.Human,
+		Check:       strings.TrimSpace(spec.Check),
 		DependsOn:   dependsOn,
 		Content:     strings.TrimSpace(spec.Content),
 		FilePath:    filepath.Join(taskDir, spec.Name+".md"),
