@@ -36,6 +36,7 @@ agmd task new add-dark-mode -t feature -p 1 --content "Add dark mode"
 agmd task new create-api --content "Create endpoints" --blocked-by "setup-db"
 agmd task new setup-db --feature auth     # Scope task to a feature
 agmd task new merge-pr --human --content "Merge PR #12"   # A step only you can do
+agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
 
 # List tasks (auto-sorted: P0→P4, then ready → blocked → completed)
 agmd task list                            # All tasks for current project
@@ -54,6 +55,10 @@ agmd task reopen merge-pr                 # Undo a completion nothing was built 
 agmd task edit setup-db --priority 0 --type bug  # Change priority/type
 agmd task edit setup-db --feature auth    # Change the feature (--feature "" clears it)
 agmd task edit merge-pr --human           # Mark for the human (--human=false hands it back)
+agmd task edit merge-pr --check "<cmd>"   # Set a human task's check (--check "" clears it)
+agmd task replace old-task --by new-task  # Close as replaced, move its dependents
+agmd task check                           # Complete open human tasks whose check passes
+agmd task lint                            # Find unflagged human- tasks and replaced-but-open ones
 agmd task blocked-by create-api setup-db  # Add dependency
 agmd task unblock create-api setup-db     # Remove dependency
 
@@ -78,6 +83,17 @@ agmd task new merge-pr --human -p 0 --content "Merge PR #12"
 agmd task new deploy --blocked-by merge-pr --content "Deploy after the merge"
 agmd task status merge-pr completed       # deploy becomes ready for agents
 ```
+
+**Checked automatically.** A step is often done outside the board (you merged on GitHub, or ran the command), and nobody ticks the task. Give a human task a check, a shell command whose exit 0 means the step is done: `task new --human --check "<cmd>"` or `task edit <task> --check "<cmd>"` (`--check ""` clears it). A check is refused on a task that is not for the human. `agmd task check [--project p]` runs the checks of all open human tasks with `sh -c` in the current folder (`AGMD_PROJECT` and `AGMD_TASK` are set), each killed after `--timeout` (default `30s`). A task whose check exits 0 is completed with the comment `verified automatically: <first output line>` (author `--author`, else `$AGMD_AUTHOR`, else `check`), which releases its dependents as usual. Stdout gets one line per completed task, `<project>/<task>`, and nothing else; `--verbose` reports the checks that did not pass on stderr, and `--json` lists both. A check stored on a task that is not flagged human is never run. `task show` prints the check.
+
+```bash
+agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
+agmd task check --project myproj          # prints "myproj/merge-pr" once the PR is merged
+```
+
+**Replaced tasks.** When a task is renamed, split or superseded, close it instead of leaving a comment: `agmd task replace <old> --by <new>` completes the old task, records `replaced_by` on it and `replaces` on the new one, moves tasks that depended on the old task to the new one (so they wait for the replacement), releases a claim on the old task and comments on both. It fails with `invalid_transition` if the old task is already completed and with `conflict` if moving a dependent would create a cycle. `task list` and `task show` print `replaced by <new>`; JSON carries `replaced_by` and `replaces`. Never leave a replaced task open.
+
+**Lint.** `agmd task lint [--project p]` lists tasks named `human-…` that are not flagged human (they are hidden from `list --human`; fix with `task edit <task> --human`) and open tasks with a comment saying they were replaced or superseded (fix with `task replace`). One line per finding, `<project>/<task> <kind>: <detail>`; `--json` for programs. The exit status is 0 either way.
 
 ### Undoing a completion
 

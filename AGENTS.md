@@ -24,6 +24,14 @@ A task with `human: true` is a step only the human can do. Any code path that
 hands work to an agent (`nextReadyTask`, `heldTask`, `task assign`, web runs)
 must skip or refuse it, inside the same locked step that picks the task.
 
+A human task may carry a `check` (shell command, exit 0 = done). Only
+`task check` runs it, only for tasks flagged human (`runHumanCheck` refuses
+others), without holding the project lock; the completion re-reads the task
+under the lock. `createTask` and `task edit` refuse a check on a non-human
+task. A replaced task is closed with `replaceTask` (`cmd/task_replace.go`),
+which completes it, sets `replaced_by`/`replaces` and moves its dependents
+in one locked step; never leave a replaced task open.
+
 ## Dependencies and Completion
 
 - "Is this dependency done?" has one answer: `dependencySatisfied(dep, now)`
@@ -47,6 +55,9 @@ must skip or refuse it, inside the same locked step that picks the task.
 - `cmd/task_comment.go` — `task comment` and per-task comment storage
 - `cmd/task_reopen.go` — `task reopen`, `status --hold`, and
   `dependencySatisfied`
+- `cmd/task_replace.go` — `task replace` (close as replaced, move dependents)
+- `cmd/task_check*.go` — `task check` (run checks of open human tasks)
+- `cmd/task_lint.go` — `task lint` (unflagged `human-` tasks, replaced-but-open)
 - `cmd/task_lock*.go` — per-project file lock and atomic file writes
 - `cmd/task_project.go` — per-project metadata (`project.json`, emoji)
 - `cmd/task_store.go` — task create/delete/claim-release and name validation,

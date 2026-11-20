@@ -31,6 +31,13 @@ type Task struct {
 	Feature   string   `yaml:"feature,omitempty"`
 	DependsOn []string `yaml:"depends_on"`
 	Human     bool     `yaml:"human,omitempty"` // a step only the human can do; never handed to agents
+	// Check is a shell command for a human task: exit 0 means the step is
+	// done, and `task check` completes the task (see task_check.go).
+	Check string `yaml:"check,omitempty"`
+	// ReplacedBy names the task that replaced this one; Replaces lists the
+	// tasks this one replaced (see task_replace.go).
+	ReplacedBy string   `yaml:"replaced_by,omitempty"`
+	Replaces   []string `yaml:"replaces,omitempty"`
 	// Timestamps are RFC 3339 UTC strings. Tasks written before they existed
 	// have none; leave them empty rather than inventing values.
 	CreatedAt   string `yaml:"created_at,omitempty"`
@@ -91,6 +98,7 @@ var taskWorkflowID string
 var taskWorktreePath string
 var taskUnassignAll bool
 var taskHuman bool
+var taskCheck string
 var taskNoHuman bool
 var taskSort string
 
@@ -252,6 +260,7 @@ Examples:
   agmd task new add-dark-mode -t feature -p 2 --content "Add dark mode"
   agmd task new create-api --content "Create API" --blocked-by "setup-db"
   agmd task new setup-db --feature auth --content "Set up auth DB"
+  agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
   echo "Task description" | agmd task new setup-db`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskNew,
@@ -355,20 +364,23 @@ Examples:
 
 var taskEditCmd = &cobra.Command{
 	Use:   "edit <task-id-or-name>",
-	Short: "Edit task priority, type, feature or human flag",
-	Long: `Edit a task's priority, type, feature or human flag.
+	Short: "Edit task priority, type, feature, human flag or check",
+	Long: `Edit a task's priority, type, feature, human flag or check.
 
 Use -p/--priority to change priority (0-4 or P0-P4).
 Use -t/--type to change type (bug, feature, task, chore).
 Use --feature to change the feature (--feature "" clears it).
 Use --human to mark a task for the human (agents never claim it);
 --human=false hands it back to agents.
+Use --check to give a human task a shell command whose exit 0 means the
+step is done ('agmd task check' runs it); --check "" clears it.
 
 Examples:
   agmd task edit setup-db -p 0              # Set to critical priority
   agmd task edit setup-db -t bug            # Change type to bug
   agmd task edit setup-db -p 1 -t feature   # Change both
   agmd task edit merge-pr --human           # Only the human can do this
+  agmd task edit merge-pr --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
   agmd task edit setup-db --feature ""      # Clear the feature`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTaskName,
@@ -448,6 +460,7 @@ func init() {
 	taskNewCmd.Flags().IntVarP(&taskPriority, "priority", "p", 2, "Priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
 	taskNewCmd.Flags().StringVarP(&taskType, "type", "t", "task", "Type (bug, feature, task, chore)")
 	taskNewCmd.Flags().BoolVar(&taskHuman, "human", false, "A step only the human can do; agents never claim it")
+	taskNewCmd.Flags().StringVar(&taskCheck, "check", "", "With --human: shell command whose exit 0 means the step is done (see 'task check')")
 	taskNewCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskNewCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -474,6 +487,7 @@ func init() {
 	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
 	taskEditCmd.Flags().StringVar(&taskFeature, "feature", "", "New feature (empty string clears it)")
 	taskEditCmd.Flags().BoolVar(&taskHuman, "human", false, "Mark as a task for the human (--human=false clears it)")
+	taskEditCmd.Flags().StringVar(&taskCheck, "check", "", "Shell command whose exit 0 means the human step is done (--check \"\" clears it)")
 	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -590,6 +604,9 @@ type taskJSONItem struct {
 	Type                string          `json:"type"`
 	Feature             string          `json:"feature,omitempty"`
 	Human               bool            `json:"human,omitempty"`
+	Check               string          `json:"check,omitempty"`
+	ReplacedBy          string          `json:"replaced_by,omitempty"`
+	Replaces            []string        `json:"replaces,omitempty"`
 	DependsOn           []string        `json:"depends_on"`
 	PendingDependencies []string        `json:"pending_dependencies,omitempty"`
 	CreatedAt           string          `json:"created_at,omitempty"`
@@ -642,6 +659,9 @@ func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string
 		Type:           taskType,
 		Feature:        task.Feature,
 		Human:          task.Human,
+		Check:          task.Check,
+		ReplacedBy:     task.ReplacedBy,
+		Replaces:       task.Replaces,
 		DependsOn:      task.DependsOn,
 		CreatedAt:      task.CreatedAt,
 		UpdatedAt:      task.UpdatedAt,
@@ -1445,6 +1465,10 @@ func printTasksGroupedByFeature(tasks []*Task, taskMap map[string]*Task, showAll
 				}
 			}
 
+			if t.ReplacedBy != "" {
+				fmt.Printf("%s  %s replaced by %s\n", indent, dim("↳"), t.ReplacedBy)
+			}
+
 			// Pending dependencies
 			if status == StatusBlocked {
 				pending := getPendingDependencies(t, taskMap)
@@ -1685,6 +1709,10 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		if t.ReplacedBy != "" {
+			fmt.Printf("  %s replaced by %s\n", dim("↳"), t.ReplacedBy)
+		}
+
 		// Pending dependencies
 		if status == StatusBlocked {
 			pending := getPendingDependencies(t, taskMap)
@@ -1732,6 +1760,7 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		Type:      taskType,
 		Feature:   taskFeature,
 		Human:     taskHuman,
+		Check:     taskCheck,
 		DependsOn: strings.Split(taskBlockedBy, ","),
 	})
 	if err != nil {
@@ -1761,6 +1790,9 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 	}
 	if taskHuman {
 		infoMsg += ", for: human"
+	}
+	if strings.TrimSpace(taskCheck) != "" {
+		infoMsg += ", checked automatically"
 	}
 	infoMsg += ")"
 	fmt.Println(infoMsg)
@@ -1847,6 +1879,15 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 	if task.Human {
 		fmt.Printf("%s human\n", dim("for:"))
+	}
+	if task.Check != "" {
+		fmt.Printf("%s %s\n", dim("check:"), task.Check)
+	}
+	if task.ReplacedBy != "" {
+		fmt.Printf("%s %s\n", dim("replaced by:"), task.ReplacedBy)
+	}
+	if len(task.Replaces) > 0 {
+		fmt.Printf("%s %s\n", dim("replaces:"), strings.Join(task.Replaces, ", "))
 	}
 	if len(task.DependsOn) > 0 {
 		fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(task.DependsOn, ", "))
@@ -2069,10 +2110,11 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 
 	featureSet := cmd.Flags().Changed("feature")
 	humanSet := cmd.Flags().Changed("human")
+	checkSet := cmd.Flags().Changed("check")
 
 	// Check if at least one flag is provided
-	if taskEditPriority == -1 && taskEditType == "" && !featureSet && !humanSet {
-		return newTaskError("invalid_input", "specify at least one of --priority, --type, --feature or --human")
+	if taskEditPriority == -1 && taskEditType == "" && !featureSet && !humanSet && !checkSet {
+		return newTaskError("invalid_input", "specify at least one of --priority, --type, --feature, --human or --check")
 	}
 
 	// Validate priority if provided
@@ -2140,6 +2182,18 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 		} else {
 			changes = append(changes, "for: agents")
 		}
+	}
+
+	if checkSet {
+		task.Check = strings.TrimSpace(taskCheck)
+		if task.Check == "" {
+			changes = append(changes, "check cleared")
+		} else {
+			changes = append(changes, "check set")
+		}
+	}
+	if task.Check != "" && !task.Human {
+		return newTaskError("invalid_input", "task '%s' has a check but is not for the human: a check only applies to human tasks (add --human or clear it with --check \"\")", taskName)
 	}
 
 	if err := saveTask(task); err != nil {

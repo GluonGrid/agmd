@@ -77,3 +77,11 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// writeFile writes content to path, fatal on error.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writeFile %s: %v", path, err)
+	}
+}
