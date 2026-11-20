@@ -33,6 +33,7 @@ What the branch contains, oldest first:
 | `c24bafa`, `c466add` | Board fixes from a design critique: stuck-work counts, confirmations, keyboard access, contrast, focus |
 | `dd77da6` | This handoff |
 | `ff68158` | Fix a data race: web server goroutines read a CLI flag global (found by `go test -race`) |
+| (PR against `feat/tasks-only`) | `task reopen` (undo a completion nothing was built on), `task status completed --hold`, `created_at`/`updated_at`/`completed_at`, `task list --sort age` |
 | (PR against `feat/tasks-only`) | Human tasks: a `human: true` field (`task new --human`, `task edit --human[=false]`, `task edit --feature`), never handed out by `next`/`assign`/board runs, `list --human`/`--no-human`, a badge on the board. Replaces the old `human-` name prefix and wrapper script. Also fixes a race in the run response |
 
 Tests: `go test ./...` passes, including with `-race`. There is no CI; run the tests locally (see [How to build, run and test](#how-to-build-run-and-test)).
@@ -59,7 +60,7 @@ Not verified here: how the binary on CT 1000 gets updated when this repo changes
 ## How it works
 
 - **A task** is `~/.agmd/task/<project>/<name>.md`: YAML frontmatter (`id`, `subject`, `status`, `priority`, `type`, `feature`, `depends_on`, optional `human`) plus a Markdown description. `AGMD_HOME` moves the whole data folder.
-- **Status** is stored as `pending`, `in_progress` or `completed`. The board shows computed columns: Blocked (pending with unfinished dependencies), Ready, In progress, Done. Completed is final.
+- **Status** is stored as `pending`, `in_progress` or `completed`. The board shows computed columns: Blocked (pending with unfinished dependencies), Ready, In progress, Done. Completed is final once something was built on it: `task reopen` undoes a completion while no dependent is claimed, in progress or completed, and `status completed --hold <dur>` keeps dependents blocked for a while so a mis-tap can be undone. Whether a dependency is done is decided in one place, `dependencySatisfied` (`cmd/task_reopen.go`).
 - **The project** is the main repository folder's name, from `git rev-parse --git-common-dir`, so all worktrees of a repo share one list. Override with `--project` or `--repo-path`.
 - **Claims** live in `<project>/assignments.json`: task id → workflow id, worktree path, last heartbeat. `next --claim` picks the highest-priority ready, unclaimed task and claims it in one locked step. A claim with no sign of life for `AGMD_CLAIM_TTL` (default 2h) can be taken over; claiming, `heartbeat` and a comment by the claiming workflow all count as signs of life.
 - **Comments** live in `<project>/comments/<task-id>.json`.
@@ -79,7 +80,7 @@ A map of the source files is in [AGENTS.md](AGENTS.md#layout).
 | Per-project `flock` plus atomic writes | Several agents run `agmd` at the same moment. Subprocess tests in `tests/integration/task_concurrency_test.go` lose up to 8 of 12 updates without the lock. |
 | `task next --claim` as the main primitive | One atomic step to pick and claim work, so two agents never get the same task. It resumes a task the workflow already holds. |
 | Claims expire (2h) with heartbeats | A crashed agent must not hold a task forever; a takeover is recorded as a comment. |
-| Completed is final | Keeps history honest and dependents stable. The board asks before completing. |
+| Completed is final once something was built on it; reopen + hold (was: "Completed is final") | The owner ticks human tasks in a phone app, and a mis-tap used to be permanent. `task reopen` is allowed only while no direct dependent is claimed, in progress or completed, checked under the project lock, so dependents stay stable and no agent loses work. `--hold` (max 1h) delays the release of dependents with a read-time comparison, no timer. Agents should not reopen tasks they didn't complete. |
 | One writing machine (CT 1000) | `flock` only excludes processes on the same machine, and file sync (Syncthing) creates conflict copies agmd would read as duplicate tasks. Decided in the `agents` repo. |
 | The web server stays on localhost | It has no login and can start Claude with file access; it refuses foreign `Origin` headers and non-IP `Host` names to block cross-site and DNS-rebinding attacks. |
 | Board columns stay status-based | The owner chose header counts and sorting to surface stuck work instead of a separate "Needs you" lane. |
@@ -148,7 +149,7 @@ In rough priority order:
 3. **Decide how CT 1000 picks up new versions** of this repo, write it down here, and cut a release (`v0.2.0`) so `install.sh` serves the task-only CLI.
 4. **Add CI** (GitHub Actions running `go test -race ./...`); there is none today.
 5. **Bring the agent skill into the repo.** `~/.claude/skills/agmd/SKILL.md` documents the agent workflow but only exists on the owner's machine. Commit a copy (for example under `skills/agmd/`) and keep the CT 1000 notes out of the generic version.
-6. **CLI gaps:** `task edit` can change priority, type, feature and the human flag, but not the title or description. Tasks have no created or updated timestamps.
+6. **CLI gaps:** `task edit` can change priority, type, feature and the human flag, but not the title or description. The web board can't reopen a task or complete with a hold yet (CLI only).
 7. **Board gaps** from the last design pass, if the local board stays in use: the list of Claude runs can't be opened on phones; the run chip on a card can't be reached with Tab; no screen-reader test has been done. A fresh `/impeccable critique` would re-score it (the last score was 23/40, before the fixes).
 8. **Windows** doesn't build because of the `Setpgid` call in `cmd/task_web_run.go`. Windows isn't a release target.
 9. **A takeover doesn't stop the old agent.** Only `task heartbeat <task>` tells it the claim was lost, and its `task status completed` still succeeds.

@@ -24,12 +24,29 @@ A task with `human: true` is a step only the human can do. Any code path that
 hands work to an agent (`nextReadyTask`, `heldTask`, `task assign`, web runs)
 must skip or refuse it, inside the same locked step that picks the task.
 
+## Dependencies and Completion
+
+- "Is this dependency done?" has one answer: `dependencySatisfied(dep, now)`
+  (`cmd/task_reopen.go`). It is false for a missing task, an unfinished one,
+  and a completion still inside its `--hold` window (`completion_counts_at`).
+  Every reader that decides whether dependents are released (computed status,
+  `next`/`--claim`, list filters, show, the web board) must go through it,
+  via `computeTaskStatus`/`getPendingDependencies` or directly; never compare
+  `Status == "completed"` for a dependency yourself.
+- Completed is final once something was built on it. `setTaskStatus` still
+  refuses to leave completed; `reopenTask` is the only way back and checks
+  the dependents and writes under the same project lock.
+- `saveTask` stamps `updated_at`; `createTask` sets `created_at`;
+  `setTaskStatus` sets `completed_at`. Never invent timestamps for old tasks.
+
 ## Layout
 
 - `cmd/task.go` — task model, storage, and all `agmd task` subcommands
 - `cmd/task_next.go` — `task next [--claim]` (atomic claiming, stale-claim
   takeover) and `task heartbeat`
 - `cmd/task_comment.go` — `task comment` and per-task comment storage
+- `cmd/task_reopen.go` — `task reopen`, `status --hold`, and
+  `dependencySatisfied`
 - `cmd/task_lock*.go` — per-project file lock and atomic file writes
 - `cmd/task_project.go` — per-project metadata (`project.json`, emoji)
 - `cmd/task_store.go` — task create/delete/claim-release and name validation,

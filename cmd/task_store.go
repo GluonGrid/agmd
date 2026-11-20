@@ -40,6 +40,11 @@ func encodeTask(task *Task) ([]byte, error) {
 		Feature   string   `yaml:"feature,omitempty"`
 		DependsOn []string `yaml:"depends_on"`
 		Human     bool     `yaml:"human,omitempty"`
+
+		CreatedAt          string `yaml:"created_at,omitempty"`
+		UpdatedAt          string `yaml:"updated_at,omitempty"`
+		CompletedAt        string `yaml:"completed_at,omitempty"`
+		CompletionCountsAt string `yaml:"completion_counts_at,omitempty"`
 	}{
 		ID:        task.ID,
 		Subject:   task.Subject,
@@ -49,6 +54,11 @@ func encodeTask(task *Task) ([]byte, error) {
 		Feature:   task.Feature,
 		DependsOn: task.DependsOn,
 		Human:     task.Human,
+
+		CreatedAt:          task.CreatedAt,
+		UpdatedAt:          task.UpdatedAt,
+		CompletedAt:        task.CompletedAt,
+		CompletionCountsAt: task.CompletionCountsAt,
 	}
 	if frontmatter.DependsOn == nil {
 		frontmatter.DependsOn = []string{}
@@ -105,7 +115,10 @@ func createTask(reg *registry.Registry, projectName string, spec newTaskSpec) (*
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create task directory: %w", err)
 	}
+	now := taskTimestamp(taskNow())
 	task := &Task{
+		CreatedAt:   now,
+		UpdatedAt:   now,
 		Name:        spec.Name,
 		ID:          computeTaskID(projectName, spec.Name),
 		Subject:     subject,
