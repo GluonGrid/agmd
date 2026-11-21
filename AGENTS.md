@@ -27,7 +27,7 @@ must skip or refuse it, inside the same locked step that picks the task.
 A human task may carry a `check` (shell command, exit 0 = done). Only
 `task check` runs it, only for tasks flagged human (`runHumanCheck` refuses
 others), without holding the project lock; the completion re-reads the task
-under the lock. `createTask` and `task edit` refuse a check on a non-human
+under the lock. `createTask` and `task update`/`edit` refuse a check on a non-human
 task. A replaced task is closed with `replaceTask` (`cmd/task_replace.go`),
 which completes it, sets `replaced_by`/`replaces` and moves its dependents
 in one locked step; never leave a replaced task open.
@@ -55,6 +55,10 @@ in one locked step; never leave a replaced task open.
 - `cmd/task_comment.go` — `task comment` and per-task comment storage
 - `cmd/task_reopen.go` — `task reopen`, `status --hold`, and
   `dependencySatisfied`
+- `cmd/task_update.go` — `task update` (text and fields in one locked step) and its
+  compatibility alias `task edit`
+- `cmd/task_dep.go` — `task dep add|remove` (cycle refusal) and the aliases
+  `task blocked-by`/`task unblock`
 - `cmd/task_replace.go` — `task replace` (close as replaced, move dependents)
 - `cmd/task_check*.go` — `task check` (run checks of open human tasks)
 - `cmd/task_lint.go` — `task lint` (unflagged `human-` tasks, replaced-but-open)

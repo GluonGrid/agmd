@@ -63,7 +63,7 @@ func completeTaskStatus(cmd *cobra.Command, args []string, toComplete string) ([
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeTaskDependency provides completion for task dependency commands (blocked-by, unblock)
+// completeTaskDependency provides completion for task dependency commands (dep add/remove, blocked-by, unblock)
 func completeTaskDependency(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	// These commands take: task-name dependency-name
 	// Complete task names for both arguments

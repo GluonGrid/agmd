@@ -300,3 +300,66 @@ func TestTaskConcurrency_ReopenRacesClaimOfDependent(t *testing.T) {
 	}
 	t.Logf("reopen won %d rounds, a claim won %d", reopenWins, claimWins)
 }
+
+// Parallel updates and dependency links on one task: no write may undo
+// another, and the claim and comments must survive.
+func TestTaskConcurrency_UpdateKeepsParallelDepAdds(t *testing.T) {
+	registry := setup(t)
+	const n = 8
+	run(t, "task", "new", "hub", "--project", "p", "--content", "start")
+	run(t, "task", "comment", "hub", "keep me", "--project", "p", "--author", "x")
+	run(t, "task", "assign", "hub", "--project", "p", "--workflow-id", "wf-1")
+	for i := 0; i < n; i++ {
+		run(t, "task", "new", fmt.Sprintf("d%d", i), "--project", "p", "--content", "dep")
+	}
+
+	results := runParallel(t, 2*n, func(i int) []string {
+		if i%2 == 0 {
+			return []string{"task", "update", "hub", "--project", "p", "--content", fmt.Sprintf("text-%d", i/2)}
+		}
+		return []string{"task", "dep", "add", "hub", fmt.Sprintf("d%d", i/2), "--project", "p"}
+	})
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("process %d failed: %v", i, r.err)
+		}
+	}
+
+	hub := showFullTask(t, "hub")
+	if len(hub.DependsOn) != n {
+		t.Errorf("hub has %d dependencies, want %d (lost updates): %v", len(hub.DependsOn), n, hub.DependsOn)
+	}
+	if !strings.HasPrefix(hub.Content, "text-") {
+		t.Errorf("hub content = %q, want one of the updates", hub.Content)
+	}
+	if len(hub.Comments) != 1 {
+		t.Errorf("comments = %+v", hub.Comments)
+	}
+	if a := readAssignments(t, registry, "p"); len(a) != 1 {
+		t.Errorf("claim lost: %v", a)
+	}
+}
+
+func TestTaskConcurrency_ParallelDepRemovesAreNotLost(t *testing.T) {
+	setup(t)
+	const n = 8
+	deps := []string{}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("d%d", i)
+		run(t, "task", "new", name, "--project", "p", "--content", "dep")
+		deps = append(deps, name)
+	}
+	run(t, "task", "new", "hub", "--project", "p", "--content", "hub", "--blocked-by", strings.Join(deps, ","))
+
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"task", "dep", "remove", "hub", fmt.Sprintf("d%d", i), "--project", "p"}
+	})
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("process %d failed: %v", i, r.err)
+		}
+	}
+	if left := showFullTask(t, "hub").DependsOn; len(left) != 0 {
+		t.Errorf("dependencies left after parallel removes: %v", left)
+	}
+}

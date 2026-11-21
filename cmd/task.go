@@ -86,6 +86,7 @@ var taskAll bool
 var taskForce bool
 var taskContent string
 var taskBlockedBy string
+var taskDependsOn string
 var taskNoEditor bool
 var taskRaw bool
 var taskStatus string
@@ -191,13 +192,13 @@ Task types:
 Subcommands:
   list        List tasks (sorted by priority, filterable)
   new         Create a new task with priority/type
-  edit        Edit task priority or type
+  update      Change a task's text, subject, priority, type, feature, human flag or check
   show        Show task content
   delete      Delete a task
   status      Update task status
   reopen      Undo a completion while nothing was built on it
-  blocked-by  Add a dependency
-  unblock     Remove a dependency
+  dep add     Add a dependency
+  dep remove  Remove a dependency
   next        Show or atomically claim the next ready task
   comment     Add a comment (progress note) to a task
   heartbeat   Keep a workflow's claims from expiring
@@ -205,14 +206,20 @@ Subcommands:
   unassign    Remove workflow assignment metadata
   web         Launch a local web UI to browse and edit tasks
 
+Compatibility aliases (still work, prefer the names above):
+  edit        = update
+  blocked-by  = dep add
+  unblock     = dep remove
+
 Examples:
   agmd task list                                    # List all tasks
   agmd task list --type bug --priority 0           # Critical bugs only
   agmd task new fix-auth -t bug -p 0 --content "Fix login"
   agmd task new setup-db --content "Set up DB"      # Create task (P2, task)
-  agmd task edit setup-db -p 0 -t bug              # Change priority and type
+  agmd task update setup-db -p 0 -t bug            # Change priority and type
+  agmd task update setup-db --content "New text"    # Replace the description
   agmd task status setup-db completed               # Update status
-  agmd task blocked-by create-api setup-db          # Add dependency`,
+  agmd task dep add create-api setup-db             # Add dependency`,
 }
 
 var taskListCmd = &cobra.Command{
@@ -254,11 +261,16 @@ var taskNewCmd = &cobra.Command{
 Priority levels: 0=critical, 1=high, 2=medium (default), 3=low, 4=backlog
 Task types: bug, feature, task (default), chore
 
+Dependencies are added with 'agmd task dep add'. --blocked-by (or its
+synonym --depends-on) is a compatibility shorthand that sets them at creation,
+in the same step: use it when the task must never be ready without them.
+
 Examples:
   agmd task new setup-db --content "Set up database"
   agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
   agmd task new add-dark-mode -t feature -p 2 --content "Add dark mode"
-  agmd task new create-api --content "Create API" --blocked-by "setup-db"
+  agmd task new create-api --content "Create API" && agmd task dep add create-api setup-db
+  agmd task new deploy --blocked-by merge-pr --content "Deploy"   # blocked from the start
   agmd task new setup-db --feature auth --content "Set up auth DB"
   agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
   echo "Task description" | agmd task new setup-db`,
@@ -319,35 +331,6 @@ Examples:
 	RunE:              runTaskStatus,
 }
 
-var taskBlockedByCmd = &cobra.Command{
-	Use:   "blocked-by <task-id-or-name> <dependency-id-or-name>",
-	Short: "Add a dependency to a task",
-	Long: `Add a dependency to a task.
-
-This makes <task-name> depend on <dependency>.
-
-Examples:
-  agmd task blocked-by create-api setup-db    # create-api depends on setup-db`,
-	Args:              cobra.ExactArgs(2),
-	ValidArgsFunction: completeTaskDependency,
-	RunE:              runTaskBlockedBy,
-}
-
-var taskUnblockCmd = &cobra.Command{
-	Use:   "unblock <task-id-or-name> <dependency-id-or-name>",
-	Short: "Remove a dependency from a task",
-	Long: `Remove a dependency from a task.
-
-Examples:
-  agmd task unblock create-api setup-db    # Remove setup-db dependency from create-api`,
-	Args:              cobra.ExactArgs(2),
-	ValidArgsFunction: completeTaskDependency,
-	RunE:              runTaskUnblock,
-}
-
-var taskEditPriority int = -1 // -1 means not set
-var taskEditType string
-
 var taskCleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Delete all completed tasks",
@@ -360,31 +343,6 @@ Examples:
   agmd task clean                # Delete completed tasks (with confirmation)
   agmd task clean --force        # Skip confirmation`,
 	RunE: runTaskClean,
-}
-
-var taskEditCmd = &cobra.Command{
-	Use:   "edit <task-id-or-name>",
-	Short: "Edit task priority, type, feature, human flag or check",
-	Long: `Edit a task's priority, type, feature, human flag or check.
-
-Use -p/--priority to change priority (0-4 or P0-P4).
-Use -t/--type to change type (bug, feature, task, chore).
-Use --feature to change the feature (--feature "" clears it).
-Use --human to mark a task for the human (agents never claim it);
---human=false hands it back to agents.
-Use --check to give a human task a shell command whose exit 0 means the
-step is done ('agmd task check' runs it); --check "" clears it.
-
-Examples:
-  agmd task edit setup-db -p 0              # Set to critical priority
-  agmd task edit setup-db -t bug            # Change type to bug
-  agmd task edit setup-db -p 1 -t feature   # Change both
-  agmd task edit merge-pr --human           # Only the human can do this
-  agmd task edit merge-pr --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
-  agmd task edit setup-db --feature ""      # Clear the feature`,
-	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: completeTaskName,
-	RunE:              runTaskEdit,
 }
 
 var taskAssignCmd = &cobra.Command{
@@ -428,9 +386,6 @@ func init() {
 	taskCmd.AddCommand(taskDeleteCmd)
 	taskCmd.AddCommand(taskStatusCmd)
 	taskCmd.AddCommand(taskCleanCmd)
-	taskCmd.AddCommand(taskBlockedByCmd)
-	taskCmd.AddCommand(taskUnblockCmd)
-	taskCmd.AddCommand(taskEditCmd)
 	taskCmd.AddCommand(taskAssignCmd)
 	taskCmd.AddCommand(taskUnassignCmd)
 	taskCmd.PersistentFlags().BoolVar(&taskJSON, "json", false, "Output machine-readable JSON")
@@ -455,7 +410,8 @@ func init() {
 	taskNewCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskNewCmd.Flags().StringVar(&taskFeature, "feature", "", "Feature/session name for this task")
 	taskNewCmd.Flags().StringVar(&taskContent, "content", "", "Task content/description")
-	taskNewCmd.Flags().StringVar(&taskBlockedBy, "blocked-by", "", "Comma-separated list of task dependencies")
+	taskNewCmd.Flags().StringVar(&taskBlockedBy, "blocked-by", "", "Comma-separated list of task dependencies (compatibility; prefer 'task dep add')")
+	taskNewCmd.Flags().StringVar(&taskDependsOn, "depends-on", "", "Synonym of --blocked-by (compatibility)")
 	taskNewCmd.Flags().BoolVar(&taskNoEditor, "no-editor", false, "Don't open editor after creating")
 	taskNewCmd.Flags().IntVarP(&taskPriority, "priority", "p", 2, "Priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
 	taskNewCmd.Flags().StringVarP(&taskType, "type", "t", "task", "Type (bug, feature, task, chore)")
@@ -476,20 +432,6 @@ func init() {
 
 	taskStatusCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
 	taskStatusCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
-	taskBlockedByCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
-	taskBlockedByCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
-	taskUnblockCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
-	taskUnblockCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
-
-	taskEditCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
-	taskEditCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
-	taskEditCmd.Flags().IntVarP(&taskEditPriority, "priority", "p", -1, "New priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
-	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
-	taskEditCmd.Flags().StringVar(&taskFeature, "feature", "", "New feature (empty string clears it)")
-	taskEditCmd.Flags().BoolVar(&taskHuman, "human", false, "Mark as a task for the human (--human=false clears it)")
-	taskEditCmd.Flags().StringVar(&taskCheck, "check", "", "Shell command whose exit 0 means the human step is done (--check \"\" clears it)")
-	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
-	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
 	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
 	taskCleanCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
@@ -1761,7 +1703,7 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		Feature:   taskFeature,
 		Human:     taskHuman,
 		Check:     taskCheck,
-		DependsOn: strings.Split(taskBlockedBy, ","),
+		DependsOn: strings.Split(taskBlockedBy+","+taskDependsOn, ","),
 	})
 	if err != nil {
 		return err
@@ -2103,126 +2045,6 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runTaskEdit(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen).SprintFunc()
-
-	taskArg := args[0]
-
-	featureSet := cmd.Flags().Changed("feature")
-	humanSet := cmd.Flags().Changed("human")
-	checkSet := cmd.Flags().Changed("check")
-
-	// Check if at least one flag is provided
-	if taskEditPriority == -1 && taskEditType == "" && !featureSet && !humanSet && !checkSet {
-		return newTaskError("invalid_input", "specify at least one of --priority, --type, --feature, --human or --check")
-	}
-
-	// Validate priority if provided
-	if taskEditPriority != -1 && (taskEditPriority < 0 || taskEditPriority > 4) {
-		return newTaskError("invalid_input", "invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskEditPriority)
-	}
-
-	// Validate type if provided
-	if taskEditType != "" && !validTaskTypes[taskEditType] {
-		return newTaskError("invalid_input", "invalid type '%s'. Use: bug, feature, task, or chore", taskEditType)
-	}
-
-	reg, err := registry.New()
-	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
-	}
-
-	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
-	if err != nil {
-		return err
-	}
-
-	unlock, err := lockProject(reg, projectName)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	task, err := resolveTaskRef(reg, projectName, taskRef)
-	if err != nil {
-		return err
-	}
-	taskName := task.Name
-
-	// Track changes for output message
-	var changes []string
-
-	// Update priority if specified
-	if taskEditPriority != -1 {
-		oldPriority := task.Priority
-		task.Priority = taskEditPriority
-		changes = append(changes, fmt.Sprintf("priority P%d → P%d", oldPriority, taskEditPriority))
-	}
-
-	// Update type if specified
-	if taskEditType != "" {
-		oldType := task.Type
-		if oldType == "" {
-			oldType = "task"
-		}
-		task.Type = taskEditType
-		changes = append(changes, fmt.Sprintf("type %s → %s", oldType, taskEditType))
-	}
-
-	if featureSet {
-		newFeature := strings.TrimSpace(taskFeature)
-		changes = append(changes, fmt.Sprintf("feature %s → %s", featureLabel(task.Feature), featureLabel(newFeature)))
-		task.Feature = newFeature
-	}
-
-	if humanSet {
-		task.Human = taskHuman
-		if taskHuman {
-			changes = append(changes, "for: human")
-		} else {
-			changes = append(changes, "for: agents")
-		}
-	}
-
-	if checkSet {
-		task.Check = strings.TrimSpace(taskCheck)
-		if task.Check == "" {
-			changes = append(changes, "check cleared")
-		} else {
-			changes = append(changes, "check set")
-		}
-	}
-	if task.Check != "" && !task.Human {
-		return newTaskError("invalid_input", "task '%s' has a check but is not for the human: a check only applies to human tasks (add --human or clear it with --check \"\")", taskName)
-	}
-
-	if err := saveTask(task); err != nil {
-		return fmt.Errorf("failed to save task: %w", err)
-	}
-
-	if taskJSON {
-		return printJSON(taskMutationJSONPayload{
-			OK:      true,
-			Action:  "edit",
-			Project: projectName,
-			Task:    taskName,
-			ID:      task.ID,
-			Status:  task.Status,
-		})
-	}
-
-	fmt.Printf("%s Updated task '%s': %s\n", green("✓"), taskName, strings.Join(changes, ", "))
-	return nil
-}
-
-// featureLabel names a feature in edit messages; an empty one reads "none".
-func featureLabel(feature string) string {
-	if feature == "" {
-		return "none"
-	}
-	return feature
-}
-
 func runTaskDelete(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 	blue := color.New(color.FgBlue).SprintFunc()
@@ -2396,150 +2218,6 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	fmt.Printf("%s Updated task '%s' status to '%s'\n", green("✓"), taskName, newStatus)
-	return nil
-}
-
-func runTaskBlockedBy(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen).SprintFunc()
-
-	taskArg := args[0]
-	dependencyArg := args[1]
-
-	reg, err := registry.New()
-	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
-	}
-
-	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
-	if err != nil {
-		return err
-	}
-
-	unlock, err := lockProject(reg, projectName)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	task, err := resolveTaskRef(reg, projectName, taskRef)
-	if err != nil {
-		return err
-	}
-	dependencyProject, dependencyRef, hasDependencyProject := parseTaskRef(dependencyArg)
-	if hasDependencyProject && dependencyProject != projectName {
-		return newTaskError(
-			"project_mismatch",
-			"dependency reference '%s' does not match project '%s'",
-			dependencyProject,
-			projectName,
-		)
-	}
-	dependencyTask, depErr := resolveTaskRef(reg, projectName, dependencyRef)
-	if depErr != nil {
-		return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dependencyArg, projectName)
-	}
-	taskName := task.Name
-	dependency := dependencyTask.Name
-
-	// Check if already depends on it
-	for _, dep := range task.DependsOn {
-		if dep == dependency {
-			return newTaskError("invalid_input", "task '%s' already depends on '%s'", taskName, dependency)
-		}
-	}
-
-	task.DependsOn = append(task.DependsOn, dependency)
-	if err := saveTask(task); err != nil {
-		return fmt.Errorf("failed to save task: %w", err)
-	}
-
-	if taskJSON {
-		return printJSON(taskMutationJSONPayload{
-			OK:      true,
-			Action:  "blocked-by",
-			Project: projectName,
-			Task:    taskName,
-			ID:      task.ID,
-			Status:  task.Status,
-		})
-	}
-
-	fmt.Printf("%s Added dependency: '%s' is now blocked by '%s'\n", green("✓"), taskName, dependency)
-	return nil
-}
-
-func runTaskUnblock(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen).SprintFunc()
-
-	taskArg := args[0]
-	dependencyArg := args[1]
-
-	reg, err := registry.New()
-	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
-	}
-
-	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
-	if err != nil {
-		return err
-	}
-
-	unlock, err := lockProject(reg, projectName)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	task, err := resolveTaskRef(reg, projectName, taskRef)
-	if err != nil {
-		return err
-	}
-	dependencyProject, dependencyRef, hasDependencyProject := parseTaskRef(dependencyArg)
-	if hasDependencyProject && dependencyProject != projectName {
-		return newTaskError(
-			"project_mismatch",
-			"dependency reference '%s' does not match project '%s'",
-			dependencyProject,
-			projectName,
-		)
-	}
-	dependencyTask, depErr := resolveTaskRef(reg, projectName, dependencyRef)
-	if depErr != nil {
-		return newTaskError("not_found", "dependency task '%s' not found in project '%s'", dependencyArg, projectName)
-	}
-	taskName := task.Name
-	dependency := dependencyTask.Name
-
-	// Remove dependency
-	found := false
-	newDeps := []string{}
-	for _, dep := range task.DependsOn {
-		if dep == dependency {
-			found = true
-		} else {
-			newDeps = append(newDeps, dep)
-		}
-	}
-
-	if !found {
-		return newTaskError("not_found", "task '%s' does not depend on '%s'", taskName, dependency)
-	}
-
-	task.DependsOn = newDeps
-	if err := saveTask(task); err != nil {
-		return fmt.Errorf("failed to save task: %w", err)
-	}
-
-	if taskJSON {
-		return printJSON(taskMutationJSONPayload{
-			OK:      true,
-			Action:  "unblock",
-			Project: projectName,
-			Task:    taskName,
-			ID:      task.ID,
-			Status:  task.Status,
-		})
-	}
-
-	fmt.Printf("%s Removed dependency: '%s' is no longer blocked by '%s'\n", green("✓"), taskName, dependency)
 	return nil
 }
 

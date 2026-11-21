@@ -36,6 +36,7 @@ What the branch contains, oldest first:
 | (PR against `feat/tasks-only`) | `task reopen` (undo a completion nothing was built on), `task status completed --hold`, `created_at`/`updated_at`/`completed_at`, `task list --sort age` |
 | (PR against `feat/tasks-only`) | `task replace <old> --by <new>` (close as replaced, link both ways, move dependents), `task check` (shell checks on human tasks, exit 0 completes them), `task lint` (unflagged `human-` tasks, replaced-but-open tasks) |
 | (PR against `feat/tasks-only`) | Human tasks: a `human: true` field (`task new --human`, `task edit --human[=false]`, `task edit --feature`), never handed out by `next`/`assign`/board runs, `list --human`/`--no-human`, a badge on the board. Replaces the old `human-` name prefix and wrapper script. Also fixes a race in the run response |
+| (PR against `feat/tasks-only`) | `task update` (text, subject and fields in one locked step; completed needs `--force`) and `task dep add/remove` (refuses cycles); `edit`, `blocked-by`, `unblock` kept as aliases; `task new --depends-on` synonym of `--blocked-by` |
 
 Tests: `go test ./...` passes, including with `-race`. There is no CI; run the tests locally (see [How to build, run and test](#how-to-build-run-and-test)).
 
@@ -150,7 +151,7 @@ In rough priority order:
 3. **Decide how CT 1000 picks up new versions** of this repo, write it down here, and cut a release (`v0.2.0`) so `install.sh` serves the task-only CLI.
 4. **Add CI** (GitHub Actions running `go test -race ./...`); there is none today.
 5. **Bring the agent skill into the repo.** `~/.claude/skills/agmd/SKILL.md` documents the agent workflow but only exists on the owner's machine. Commit a copy (for example under `skills/agmd/`) and keep the CT 1000 notes out of the generic version.
-6. **CLI gaps:** `task edit` can change priority, type, feature and the human flag, but not the title or description. The web board can't reopen a task or complete with a hold yet (CLI only).
+6. **CLI gaps:** The web board can't reopen a task or complete with a hold yet (CLI only).
 7. **Board gaps** from the last design pass, if the local board stays in use: the list of Claude runs can't be opened on phones; the run chip on a card can't be reached with Tab; no screen-reader test has been done. A fresh `/impeccable critique` would re-score it (the last score was 23/40, before the fixes).
 8. **Windows** doesn't build because of the `Setpgid` call in `cmd/task_web_run.go`. Windows isn't a release target.
 9. **A takeover doesn't stop the old agent.** Only `task heartbeat <task>` tells it the claim was lost, and its `task status completed` still succeeds.
