@@ -29,7 +29,9 @@ Get started:
   agmd task list
   agmd task web
 
-Run 'agmd task --help' for every task command.`,
+Agents: read 'agmd task --help' once per session. It is the whole reference
+in one screen: commands, update and dependency patterns, claiming, human
+tasks, JSON and exit codes.`,
 	Version: "0.1.0",
 }
 

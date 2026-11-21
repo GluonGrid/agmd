@@ -138,6 +138,8 @@ agmd task unassign setup-db                           # Release the claim (back 
 
 `next --claim` atomically picks the highest-priority agent task (never a [human task](#human-tasks)) that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
 
+`agmd task --help` is the whole agent reference in one screen (command matrix, update and dependency patterns, claiming, human tasks, JSON, exit codes, examples); an agent can read it once per session instead of each command's help.
+
 ### Stale claims
 
 If an agent dies mid-task, its claim expires so the work isn't stuck. A claim stays alive while its workflow shows signs of life: claiming or resuming with `next --claim`, `agmd task heartbeat --workflow-id agent-1`, or a comment whose `--author` is the workflow id. After `--stale-after` without any (default `$AGMD_CLAIM_TTL`, else `2h`; `0` disables expiry), `next --claim` may hand the task to another workflow (`"action":"takeover"`, `"taken_over_from":"agent-1"`) and records the takeover as a comment. Ready, unclaimed tasks are still preferred over stale ones of the same priority, and a task whose dependencies aren't done is never handed out.

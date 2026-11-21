@@ -169,57 +169,59 @@ var taskCmd = &cobra.Command{
 		cmd.SilenceUsage = true
 		cmd.SilenceErrors = true
 	},
-	Long: `Manage project tasks with dependencies, priorities, and status tracking.
+	Long: `Task board for agents and humans. Read this once per session.
 
-Tasks are organized by project (derived from repository identity).
-In Git worktrees, agmd resolves to the canonical repository project.
-Each task has a priority (P0-P4) and type (bug/feature/task/chore).
-Tasks are auto-sorted by priority then status.
+Tasks: ~/.agmd/task/<project>/<name>.md. Project = main repo folder name
+(worktrees share it); override with --project or --repo-path.
+Refer to a task by name or id. Priority -p 0-4 (P0 critical, P2 default).
+Type -t bug|feature|task|chore. Status pending|in_progress|completed;
+computed: ready, blocked (unfinished dependency), in_progress, completed.
 
-Priority levels:
-  P0  critical    Urgent issues requiring immediate attention
-  P1  high        Important tasks to address soon
-  P2  medium      Default priority for normal tasks
-  P3  low         Can be done when time permits
-  P4  backlog     Ideas and future work
+Commands:
+  read          list [--all --status S --feature F --human|--no-human --tree]
+                show <t> [--raw], show --all, next (peek)
+  create        new <t> --content "..." [-p N -t T --feature F]
+  change        update <t> [--content|--content-file|--subject|-p|-t|--feature]
+  dependencies  dep add <t> <dep>, dep remove <t> <dep>
+  lifecycle     next --claim, heartbeat, comment, status, unassign,
+                reopen, replace, delete, clean
+  human tasks   new <t> --human [--check CMD], list --human, check
+  checks        check (human-task checks), lint (forgotten or mislabelled)
+  other         assign, emoji, web
 
-Task types:
-  bug      Defect to fix
-  feature  New functionality
-  task     General task (default)
-  chore    Maintenance work
+Change a task: one 'update' call sets any mix of text and fields under the
+project lock. Completed tasks need --force. Never edit task files by hand.
 
-Subcommands:
-  list        List tasks (sorted by priority, filterable)
-  new         Create a new task with priority/type
-  update      Change a task's text, subject, priority, type, feature, human flag or check
-  show        Show task content
-  delete      Delete a task
-  status      Update task status
-  reopen      Undo a completion while nothing was built on it
-  dep add     Add a dependency
-  dep remove  Remove a dependency
-  next        Show or atomically claim the next ready task
-  comment     Add a comment (progress note) to a task
-  heartbeat   Keep a workflow's claims from expiring
-  assign      Attach workflow assignment metadata
-  unassign    Remove workflow assignment metadata
-  web         Launch a local web UI to browse and edit tasks
+Dependencies: 'dep add <t> <dep>' makes <t> wait for <dep> (cycles refused);
+'dep remove <t> <dep>' drops it. A blocked task is never handed out.
+'new <t> --depends-on a,b' sets them at creation.
 
-Compatibility aliases (still work, prefer the names above):
-  edit        = update
-  blocked-by  = dep add
-  unblock     = dep remove
+Claiming: 'next --claim --workflow-id W' atomically claims the best ready
+task, or resumes the one W holds. Claims idle over 2h ($AGMD_CLAIM_TTL) can
+be taken over: keep them alive with 'heartbeat [<t>] --workflow-id W' or
+'comment <t> "..." --author W'. Finish: 'status <t> completed'. Give up:
+'unassign <t>' (back to pending).
+
+Human tasks (--human) are never handed to agents. 'check' runs their --check
+commands and completes those that exit 0.
+
+Undo: 'reopen <t>' undoes a completion while no dependent is claimed or
+done; 'status <t> completed --hold 2m' delays releasing dependents.
+'replace <old> --by <new>' closes <old> and moves its dependents to <new>.
+
+JSON: --json on every command; errors are one JSON line on stderr.
+Exit codes: 0 ok, 1 other, 2 invalid_input, 3 not_found (also: nothing to
+claim), 4 project_mismatch, 5 invalid_transition, 6 conflict.
 
 Examples:
-  agmd task list                                    # List all tasks
-  agmd task list --type bug --priority 0           # Critical bugs only
-  agmd task new fix-auth -t bug -p 0 --content "Fix login"
-  agmd task new setup-db --content "Set up DB"      # Create task (P2, task)
-  agmd task update setup-db -p 0 -t bug            # Change priority and type
-  agmd task update setup-db --content "New text"    # Replace the description
-  agmd task status setup-db completed               # Update status
-  agmd task dep add create-api setup-db             # Add dependency`,
+  agmd task next --claim --workflow-id W --json | jq -r .task.name
+  agmd task update fix-auth -p 0 --content "Repro: ..." --json
+  agmd task new deploy --content "Deploy" && agmd task dep add deploy fix-auth
+  agmd task list --json | jq '.tasks[] | {name, computed_status, dependencies}'
+
+Aliases (compatibility, prefer the names above): edit = update,
+blocked-by = dep add, unblock = dep remove, new --blocked-by = --depends-on.
+Details: agmd task <command> --help`,
 }
 
 var taskListCmd = &cobra.Command{
@@ -389,6 +391,17 @@ func init() {
 	taskCmd.AddCommand(taskAssignCmd)
 	taskCmd.AddCommand(taskUnassignCmd)
 	taskCmd.PersistentFlags().BoolVar(&taskJSON, "json", false, "Output machine-readable JSON")
+	// 'agmd task --help' is the one-screen agent reference: print the Long
+	// text alone, without cobra's generated command list, which repeats it.
+	// Subcommands keep the default help.
+	defaultHelp := taskCmd.HelpFunc()
+	taskCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd != taskCmd {
+			defaultHelp(cmd, args)
+			return
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), cmd.Long)
+	})
 
 	// Add --project/--repo-path and --feature flags to subcommands that need them
 	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
