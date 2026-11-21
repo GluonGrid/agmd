@@ -19,7 +19,8 @@ curl -fsSL https://gluongrid.dev/agmd/install.sh | bash
 
 cd your-repo
 agmd task new setup-db --content "Set up database schema"
-agmd task new create-api --content "Create endpoints" --blocked-by setup-db
+agmd task new create-api --content "Create endpoints"
+agmd task dep add create-api setup-db
 agmd task list
 agmd task web
 ```
@@ -33,7 +34,7 @@ There is nothing to initialize: the first write creates `~/.agmd/task/<project>/
 agmd task new setup-db --content "Set up database schema"
 agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
 agmd task new add-dark-mode -t feature -p 1 --content "Add dark mode"
-agmd task new create-api --content "Create endpoints" --blocked-by "setup-db"
+agmd task new create-api --content "Create endpoints"
 agmd task new setup-db --feature auth     # Scope task to a feature
 agmd task new merge-pr --human --content "Merge PR #12"   # A step only you can do
 agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
@@ -52,15 +53,19 @@ agmd task list --sort age                 # Oldest-created first (default: --sor
 agmd task status setup-db completed       # Update status
 agmd task status merge-pr completed --hold 2m   # Done now, releases dependents in 2 minutes
 agmd task reopen merge-pr                 # Undo a completion nothing was built on yet
-agmd task edit setup-db --priority 0 --type bug  # Change priority/type
-agmd task edit setup-db --feature auth    # Change the feature (--feature "" clears it)
-agmd task edit merge-pr --human           # Mark for the human (--human=false hands it back)
-agmd task edit merge-pr --check "<cmd>"   # Set a human task's check (--check "" clears it)
+agmd task update setup-db --content "New text"   # Replace the description
+agmd task update setup-db --content-file notes.md  # ... from a file (- reads stdin)
+cat notes.md | agmd task update setup-db  # ... from stdin
+agmd task update setup-db --subject "Set up the database"  # Change the subject
+agmd task update setup-db --priority 0 --type bug  # Change priority/type
+agmd task update setup-db --feature auth  # Change the feature (--feature "" clears it)
+agmd task update merge-pr --human         # Mark for the human (--human=false hands it back)
+agmd task update merge-pr --check "<cmd>" # Set a human task's check (--check "" clears it)
 agmd task replace old-task --by new-task  # Close as replaced, move its dependents
 agmd task check                           # Complete open human tasks whose check passes
 agmd task lint                            # Find unflagged human- tasks and replaced-but-open ones
-agmd task blocked-by create-api setup-db  # Add dependency
-agmd task unblock create-api setup-db     # Remove dependency
+agmd task dep add create-api setup-db     # Add dependency (refuses cycles)
+agmd task dep remove create-api setup-db  # Remove dependency
 
 # View and delete
 agmd task show setup-db                   # Show task content
@@ -68,6 +73,10 @@ agmd task show --all                      # Show all tasks with content
 agmd task delete setup-db --force         # Delete task
 agmd task clean                           # Delete all completed tasks
 ```
+
+`task update` changes everything in one locked step and keeps the task's id, dependencies, comments, claim and `created_at`; `updated_at` is set to now. A completed task is refused with `invalid_transition` unless you pass `--force`. `--json` prints `{"ok":true,"action":"update",...}` like the other commands.
+
+**Compatibility aliases.** Older names still work and keep their JSON `action`: `task edit` = `task update` (it also changes completed tasks without `--force` and never reads stdin), `task blocked-by` = `task dep add`, `task unblock` = `task dep remove`, and `task new --blocked-by a,b` (or `--depends-on a,b`) sets dependencies at creation. Use that shorthand when the new task must never be ready without its dependencies: between `task new` and `task dep add` an agent could claim it.
 
 **Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
 **Task types:** bug, feature, task (default, hidden), chore
@@ -80,11 +89,11 @@ To make agent work wait for you, block it on the human task. Completing the huma
 
 ```bash
 agmd task new merge-pr --human -p 0 --content "Merge PR #12"
-agmd task new deploy --blocked-by merge-pr --content "Deploy after the merge"
+agmd task new deploy --blocked-by merge-pr --content "Deploy after the merge"   # blocked from the start
 agmd task status merge-pr completed       # deploy becomes ready for agents
 ```
 
-**Checked automatically.** A step is often done outside the board (you merged on GitHub, or ran the command), and nobody ticks the task. Give a human task a check, a shell command whose exit 0 means the step is done: `task new --human --check "<cmd>"` or `task edit <task> --check "<cmd>"` (`--check ""` clears it). A check is refused on a task that is not for the human. `agmd task check [--project p]` runs the checks of all open human tasks with `sh -c` in the current folder (`AGMD_PROJECT` and `AGMD_TASK` are set), each killed after `--timeout` (default `30s`). A task whose check exits 0 is completed with the comment `verified automatically: <first output line>` (author `--author`, else `$AGMD_AUTHOR`, else `check`), which releases its dependents as usual. Stdout gets one line per completed task, `<project>/<task>`, and nothing else; `--verbose` reports the checks that did not pass on stderr, and `--json` lists both. A check stored on a task that is not flagged human is never run. `task show` prints the check.
+**Checked automatically.** A step is often done outside the board (you merged on GitHub, or ran the command), and nobody ticks the task. Give a human task a check, a shell command whose exit 0 means the step is done: `task new --human --check "<cmd>"` or `task update <task> --check "<cmd>"` (`--check ""` clears it). A check is refused on a task that is not for the human. `agmd task check [--project p]` runs the checks of all open human tasks with `sh -c` in the current folder (`AGMD_PROJECT` and `AGMD_TASK` are set), each killed after `--timeout` (default `30s`). A task whose check exits 0 is completed with the comment `verified automatically: <first output line>` (author `--author`, else `$AGMD_AUTHOR`, else `check`), which releases its dependents as usual. Stdout gets one line per completed task, `<project>/<task>`, and nothing else; `--verbose` reports the checks that did not pass on stderr, and `--json` lists both. A check stored on a task that is not flagged human is never run. `task show` prints the check.
 
 ```bash
 agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
@@ -93,7 +102,7 @@ agmd task check --project myproj          # prints "myproj/merge-pr" once the PR
 
 **Replaced tasks.** When a task is renamed, split or superseded, close it instead of leaving a comment: `agmd task replace <old> --by <new>` completes the old task, records `replaced_by` on it and `replaces` on the new one, moves tasks that depended on the old task to the new one (so they wait for the replacement), releases a claim on the old task and comments on both. It fails with `invalid_transition` if the old task is already completed and with `conflict` if moving a dependent would create a cycle. `task list` and `task show` print `replaced by <new>`; JSON carries `replaced_by` and `replaces`. Never leave a replaced task open.
 
-**Lint.** `agmd task lint [--project p]` lists tasks named `human-…` that are not flagged human (they are hidden from `list --human`; fix with `task edit <task> --human`) and open tasks with a comment saying they were replaced or superseded (fix with `task replace`). One line per finding, `<project>/<task> <kind>: <detail>`; `--json` for programs. The exit status is 0 either way.
+**Lint.** `agmd task lint [--project p]` lists tasks named `human-…` that are not flagged human (they are hidden from `list --human`; fix with `task update <task> --human`) and open tasks with a comment saying they were replaced or superseded (fix with `task replace`). One line per finding, `<project>/<task> <kind>: <detail>`; `--json` for programs. The exit status is 0 either way.
 
 ### Undoing a completion
 
@@ -106,7 +115,7 @@ agmd task status merge-pr completed --hold 2m
 agmd task reopen merge-pr --author app    # within 2 minutes: nobody has started deploy
 ```
 
-Tasks are auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Dependencies via `--blocked-by` are validated on creation.
+Tasks are auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Dependencies are validated when they are added: the dependency must exist, and `task dep add` refuses a link that would make a task depend on itself, directly or through other tasks (`conflict`).
 
 ## Projects
 
