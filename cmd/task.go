@@ -250,6 +250,7 @@ Examples:
   agmd task list --type bug                 # Only bugs
   agmd task list --type bug --priority 0    # Critical bugs only
   agmd task list --tree                     # Show dependency tree
+  agmd task list --json --tree              # JSON with dependency edges
   agmd task list --sort age                 # Oldest tasks first
   agmd task list --project myproj           # List tasks for specific project`,
 	RunE: runTaskList,
@@ -410,7 +411,7 @@ func init() {
 	taskListCmd.Flags().BoolVarP(&taskAll, "all", "a", false, "Include completed tasks")
 	taskListCmd.Flags().StringVar(&taskStatus, "status", "", "Filter by computed status (ready, blocked, in_progress, completed)")
 	taskListCmd.RegisterFlagCompletionFunc("status", completeListStatusFlag)
-	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization")
+	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization (with --json: add dependency edges)")
 	taskListCmd.Flags().StringVarP(&taskFilterPriority, "priority", "p", "", "Filter by priority (0-4 or P0-P4)")
 	taskListCmd.Flags().StringVarP(&taskFilterType, "type", "t", "", "Filter by type (bug, feature, task, chore)")
 	taskListCmd.Flags().BoolVar(&taskHuman, "human", false, "Only show tasks for the human")
@@ -549,28 +550,29 @@ func ensureTaskIdentity(task *Task, projectName string) {
 }
 
 type taskJSONItem struct {
-	ID                  string          `json:"id"`
-	Name                string          `json:"name"`
-	Project             string          `json:"project"`
-	Subject             string          `json:"subject"`
-	Status              string          `json:"status"`
-	ComputedStatus      string          `json:"computed_status"`
-	Priority            int             `json:"priority"`
-	Type                string          `json:"type"`
-	Feature             string          `json:"feature,omitempty"`
-	Human               bool            `json:"human,omitempty"`
-	Check               string          `json:"check,omitempty"`
-	ReplacedBy          string          `json:"replaced_by,omitempty"`
-	Replaces            []string        `json:"replaces,omitempty"`
-	DependsOn           []string        `json:"depends_on"`
-	PendingDependencies []string        `json:"pending_dependencies,omitempty"`
-	CreatedAt           string          `json:"created_at,omitempty"`
-	UpdatedAt           string          `json:"updated_at,omitempty"`
-	CompletedAt         string          `json:"completed_at,omitempty"`
-	HoldUntil           string          `json:"hold_until,omitempty"`
-	Assignment          *taskAssignment `json:"assignment,omitempty"`
-	Content             string          `json:"content,omitempty"`
-	Comments            []taskComment   `json:"comments,omitempty"`
+	ID                  string              `json:"id"`
+	Name                string              `json:"name"`
+	Project             string              `json:"project"`
+	Subject             string              `json:"subject"`
+	Status              string              `json:"status"`
+	ComputedStatus      string              `json:"computed_status"`
+	Priority            int                 `json:"priority"`
+	Type                string              `json:"type"`
+	Feature             string              `json:"feature,omitempty"`
+	Human               bool                `json:"human,omitempty"`
+	Check               string              `json:"check,omitempty"`
+	ReplacedBy          string              `json:"replaced_by,omitempty"`
+	Replaces            []string            `json:"replaces,omitempty"`
+	DependsOn           []string            `json:"depends_on"`
+	Dependencies        []taskDependencyRef `json:"dependencies"`
+	PendingDependencies []string            `json:"pending_dependencies,omitempty"`
+	CreatedAt           string              `json:"created_at,omitempty"`
+	UpdatedAt           string              `json:"updated_at,omitempty"`
+	CompletedAt         string              `json:"completed_at,omitempty"`
+	HoldUntil           string              `json:"hold_until,omitempty"`
+	Assignment          *taskAssignment     `json:"assignment,omitempty"`
+	Content             string              `json:"content,omitempty"`
+	Comments            []taskComment       `json:"comments,omitempty"`
 }
 
 type taskListJSONPayload struct {
@@ -618,6 +620,7 @@ func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string
 		ReplacedBy:     task.ReplacedBy,
 		Replaces:       task.Replaces,
 		DependsOn:      task.DependsOn,
+		Dependencies:   resolveTaskDependencies(task, taskMap),
 		CreatedAt:      task.CreatedAt,
 		UpdatedAt:      task.UpdatedAt,
 		CompletedAt:    task.CompletedAt,
@@ -1480,8 +1483,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 
 	if len(tasks) == 0 {
 		if taskJSON {
-			emptyTaskMap := map[string]*Task{}
-			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, assignments, false))
+			return printTaskListJSON(projectName, tasks, map[string]*Task{}, assignments)
 		}
 		if taskFeature != "" {
 			fmt.Printf("%s No tasks for project '%s' with feature '%s'\n", yellow("!"), projectName, taskFeature)
@@ -1569,10 +1571,6 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	default:
 		return newTaskError("invalid_input", "invalid --sort '%s'. Use: priority or age", taskSort)
 	}
-	if taskJSON && taskTree {
-		return newTaskError("invalid_input", "cannot use --tree with --json")
-	}
-
 	visible := sorted
 	if !taskAll {
 		filtered := make([]*Task, 0, len(sorted))
@@ -1584,7 +1582,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		visible = filtered
 	}
 	if taskJSON {
-		return printJSON(buildTaskListJSON(projectName, taskFeature, visible, taskMap, assignments, false))
+		return printTaskListJSON(projectName, visible, taskMap, assignments)
 	}
 
 	// Count by status
