@@ -13,6 +13,8 @@ concurrent processes.
   (`cmd/task_lock.go`). Never hold it while waiting for user input, and never
   call it while already holding it: flock is per open file, so a nested call
   in the same process blocks forever.
+  A command that changes two projects takes both locks with
+  `lockTwoProjects` (fixed name order, so it cannot deadlock).
 - Write files with `writeFileAtomic` (replace) or `writeFileExclusive`
   (create-once), never `os.WriteFile`.
 - `tests/integration/task_concurrency_test.go` runs a built binary as parallel
@@ -52,7 +54,8 @@ in one locked step; never leave a replaced task open.
 - `cmd/task.go` — task model, storage, and all `agmd task` subcommands
 - `cmd/task_next.go` — `task next [--claim]` (atomic claiming, stale-claim
   takeover) and `task heartbeat`
-- `cmd/task_comment.go` — `task comment` and per-task comment storage
+- `cmd/task_comment.go` — `task comment` (add, `--delete <n>`) and per-task
+  comment storage
 - `cmd/task_reopen.go` — `task reopen`, `status --hold`, and
   `dependencySatisfied`
 - `cmd/task_update.go` — `task update` (text and fields in one locked step) and its
@@ -62,6 +65,8 @@ in one locked step; never leave a replaced task open.
 - `cmd/task_replace.go` — `task replace` (close as replaced, move dependents)
 - `cmd/task_check*.go` — `task check` (run checks of open human tasks)
 - `cmd/task_lint.go` — `task lint` (unflagged `human-` tasks, replaced-but-open)
+- `cmd/task_move.go` — `task move` (to another project; takes both project
+  locks with `lockTwoProjects`, always in name order)
 - `cmd/task_lock*.go` — per-project file lock and atomic file writes
 - `cmd/task_project.go` — per-project metadata (`project.json`, emoji)
 - `cmd/task_store.go` — task create/delete/claim-release and name validation,

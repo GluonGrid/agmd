@@ -17,7 +17,7 @@ func TestTaskHelp_AgentReferenceSections(t *testing.T) {
 		// patterns
 		"update <t>", "dep add <t> <dep>", "dep remove <t> <dep>",
 		"next --claim --workflow-id W", "heartbeat", "--human", "--check", "check",
-		"reopen <t>", "replace <old> --by <new>",
+		"reopen <t>", "replace <old> --by <new>", "move <t> --to-project", "--delete N", "lint [--all]",
 		// JSON and exit codes
 		"--json", "Exit codes:", "2 invalid_input", "3 not_found", "6 conflict",
 		"Examples:", "list --json",

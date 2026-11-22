@@ -231,3 +231,21 @@ func TestTaskLint_FindsUnflaggedAndReplacedTasks(t *testing.T) {
 		t.Errorf("lint found %d lines, want 2:\n%s", n, out)
 	}
 }
+
+func TestTaskLint_OpenOnlyByDefaultAndNoNoise(t *testing.T) {
+	setup(t)
+	chdir(t)
+	run(t, "task", "new", "human-done", "--project", "p", "--content", "Old and done")
+	run(t, "task", "status", "human-done", "completed", "--project", "p")
+	run(t, "task", "new", "noisy", "--project", "p", "--content", "N")
+	run(t, "task", "comment", "noisy", "The token is replaced on every deploy", "--project", "p")
+	run(t, "task", "comment", "noisy", "Should be replaced by better-name later", "--project", "p")
+
+	if out := strings.TrimSpace(run(t, "task", "lint", "--project", "p")); out != "" {
+		t.Errorf("lint should find nothing in open tasks, got:\n%s", out)
+	}
+	out := run(t, "task", "lint", "--project", "p", "--all")
+	if !strings.Contains(out, "p/human-done human-name-not-flagged") || strings.Contains(out, "noisy") {
+		t.Errorf("lint --all output:\n%s", out)
+	}
+}
