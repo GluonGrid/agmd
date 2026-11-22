@@ -37,6 +37,7 @@ What the branch contains, oldest first:
 | (PR against `feat/tasks-only`) | `task replace <old> --by <new>` (close as replaced, link both ways, move dependents), `task check` (shell checks on human tasks, exit 0 completes them), `task lint` (unflagged `human-` tasks, replaced-but-open tasks) |
 | (PR against `feat/tasks-only`) | Human tasks: a `human: true` field (`task new --human`, `task edit --human[=false]`, `task edit --feature`), never handed out by `next`/`assign`/board runs, `list --human`/`--no-human`, a badge on the board. Replaces the old `human-` name prefix and wrapper script. Also fixes a race in the run response |
 | (PR against `feat/tasks-only`) | `task update` (text, subject and fields in one locked step; completed needs `--force`) and `task dep add/remove` (refuses cycles); `edit`, `blocked-by`, `unblock` kept as aliases; `task new --depends-on` synonym of `--blocked-by` |
+| (PR against `feat/tasks-only`) | `agmd task --help` as a one-screen agent reference; `task list --json` gains `dependencies` (canonical id and name per dependency) and `--json --tree` adds dependency `edges` (contract in README) |
 
 Tests: `go test ./...` passes, including with `-race`. There is no CI; run the tests locally (see [How to build, run and test](#how-to-build-run-and-test)).
 

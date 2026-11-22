@@ -138,6 +138,8 @@ agmd task unassign setup-db                           # Release the claim (back 
 
 `next --claim` atomically picks the highest-priority agent task (never a [human task](#human-tasks)) that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
 
+`agmd task --help` is the whole agent reference in one screen (command matrix, update and dependency patterns, claiming, human tasks, JSON, exit codes, examples); an agent can read it once per session instead of each command's help.
+
 ### Stale claims
 
 If an agent dies mid-task, its claim expires so the work isn't stuck. A claim stays alive while its workflow shows signs of life: claiming or resuming with `next --claim`, `agmd task heartbeat --workflow-id agent-1`, or a comment whose `--author` is the workflow id. After `--stale-after` without any (default `$AGMD_CLAIM_TTL`, else `2h`; `0` disables expiry), `next --claim` may hand the task to another workflow (`"action":"takeover"`, `"taken_over_from":"agent-1"`) and records the takeover as a comment. Ready, unclaimed tasks are still preferred over stale ones of the same priority, and a task whose dependencies aren't done is never handed out.
@@ -168,6 +170,24 @@ Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"err
 agmd task list --json --status ready
 agmd task assign setup-db --workflow-id agent-1 --worktree-path ../wt-1
 agmd task unassign --all --workflow-id agent-1
+```
+
+### Task list JSON
+
+`agmd task list --json` is flat and stable: one object per task, nothing nested beyond what is shown. `depends_on` lists the references as stored (task names); `dependencies` lists the same tasks resolved to their canonical `id` and `name` (a reference that matches no task keeps its name and gets `"missing": true`, no id). `pending_dependencies` appears on blocked tasks only. Fields such as `feature`, `human`, `check` and `assignment` are left out when empty.
+
+```json
+{"project":"demo","tasks":[
+  {"id":"tsk_eaf579d3d99c6f8b","name":"setup-db","project":"demo","subject":"Setup Db","status":"pending","computed_status":"ready","priority":2,"type":"task","depends_on":[],"dependencies":[]},
+  {"id":"tsk_33cbcfa186886107","name":"create-api","project":"demo","subject":"Create Api","status":"pending","computed_status":"blocked","priority":2,"type":"task","depends_on":["setup-db"],"dependencies":[{"id":"tsk_eaf579d3d99c6f8b","name":"setup-db"}],"pending_dependencies":["setup-db"]}],
+ "counts":{"total":2,"ready":1,"blocked":1,"in_progress":0,"completed":0}}
+```
+
+`agmd task list --json --tree` returns the same object plus `edges`, one per dependency of each listed task, for drawing the graph: `from` depends on `to`. `satisfied` says whether `to` is done; `to` may be absent from `tasks` (completed and hidden without `--all`, filtered out, or `missing`). Timestamps are left out of both examples.
+
+```json
+{"project":"demo","tasks":[...same as above...],"counts":{...},
+ "edges":[{"from":"create-api","from_id":"tsk_33cbcfa186886107","to":"setup-db","to_id":"tsk_eaf579d3d99c6f8b","satisfied":false}]}
 ```
 
 Concurrent use is safe: every change to a project's files happens under a per-project file lock (`<project>/.lock`), and files are replaced atomically, so the web board and any number of CLI agents can work side by side.
