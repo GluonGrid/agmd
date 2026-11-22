@@ -2,9 +2,9 @@
 
 # agmd
 
-**Stop copy-pasting AI instructions between projects.**
+**A task board for you and your coding agents, driven from the CLI.**
 
-Maintain a personal registry of rules, workflows, and guidelines that you can mix and match across any project. Write your standards once, use them everywhere.
+Plain markdown task files, dependency-aware ordering, JSON output for agents, and a local web board — no server, no database, no account.
 
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -12,303 +12,218 @@ Maintain a personal registry of rules, workflows, and guidelines that you can mi
 
 </div>
 
-## The Problem
-
-Every project needs an `AGENTS.md` or `CLAUDE.md` file to guide AI coding assistants. But maintaining these files is painful:
-
-- **Copy-paste hell** - Same rules duplicated across 10+ repos
-- **Drift** - Update one file, forget the others
-- **No reuse** - Can't easily share best practices between projects
-- **Verbose** - Files grow to 500+ lines, hard to scan
-
-## The Solution
-
-agmd introduces a directive-based system:
-
-```
-your-project/
-├── directives.md        # What you edit (compact references)
-├── directives.local.md  # Personal overrides (gitignored, optional)
-└── AGENTS.md            # What AI reads (expanded content, or served via hooks)
-```
-
-Your `directives.md` stays clean and scannable:
-
-```markdown
-# Project Instructions
-
-## Code Quality
-:::use rule:typescript
-:::use rule:no-any
-
-## Workflows
-:::use workflow:commit
-:::use workflow:pr-review
-
-## Guidelines
-:::list
-guideline:code-style
-guideline:documentation
-guideline:testing
-:::end
-```
-
-Run `agmd sync` and it expands to a full `AGENTS.md` with all the content — or use `agmd sync --stdout` with hooks for a file-less workflow.
-
 ## Quick Start
 
 ```bash
-# Install
 curl -fsSL https://gluongrid.dev/agmd/install.sh | bash
 
-# Initialize your personal registry
-agmd setup
-
-# In any project
-agmd init              # Create directives.md
-agmd edit              # Add directives (opens editor)
-agmd sync              # Generate AGENTS.md
+cd your-repo
+agmd task new setup-db --content "Set up database schema"
+agmd task new create-api --content "Create endpoints"
+agmd task dep add create-api setup-db
+agmd task list
+agmd task web
 ```
 
-## Already Have a CLAUDE.md or AGENTS.md?
+There is nothing to initialize: the first write creates `~/.agmd/task/<project>/`.
 
-Don't start from scratch:
+## Tasks
 
 ```bash
-# For raw/unstructured files (not using agmd yet)
-agmd migrate CLAUDE.md
+# Create tasks with priority and type
+agmd task new setup-db --content "Set up database schema"
+agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
+agmd task new add-dark-mode -t feature -p 1 --content "Add dark mode"
+agmd task new create-api --content "Create endpoints"
+agmd task new setup-db --feature auth     # Scope task to a feature
+agmd task new merge-pr --human --content "Merge PR #12"   # A step only you can do
+agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
 
-# For agmd-compatible projects (has directives.md)
-agmd collect
+# List tasks (auto-sorted: P0→P4, then ready → blocked → completed)
+agmd task list                            # All tasks for current project
+agmd task list --type bug --priority 0    # Critical bugs only
+agmd task list --feature auth             # Filter by feature
+agmd task list --status ready             # Filter by computed status
+agmd task list --tree                     # Show dependency tree
+agmd task list --all                      # Include completed tasks
+agmd task list --human                    # Only tasks for the human (--no-human hides them)
+agmd task list --sort age                 # Oldest-created first (default: --sort priority)
+
+# Manage status and dependencies
+agmd task status setup-db completed       # Update status
+agmd task status merge-pr completed --hold 2m   # Done now, releases dependents in 2 minutes
+agmd task reopen merge-pr                 # Undo a completion nothing was built on yet
+agmd task update setup-db --content "New text"   # Replace the description
+agmd task update setup-db --content-file notes.md  # ... from a file (- reads stdin)
+cat notes.md | agmd task update setup-db  # ... from stdin
+agmd task update setup-db --subject "Set up the database"  # Change the subject
+agmd task update setup-db --priority 0 --type bug  # Change priority/type
+agmd task update setup-db --feature auth  # Change the feature (--feature "" clears it)
+agmd task update merge-pr --human         # Mark for the human (--human=false hands it back)
+agmd task update merge-pr --check "<cmd>" # Set a human task's check (--check "" clears it)
+agmd task replace old-task --by new-task  # Close as replaced, move its dependents
+agmd task move setup-db --to-project infra  # Move to another project (keeps id, comments)
+agmd task comment setup-db --delete 2     # Delete comment #2 (yours; others need --force)
+agmd task check                           # Complete open human tasks whose check passes
+agmd task lint                            # Find unflagged human- tasks and replaced-but-open ones (--all: completed too)
+agmd task dep add create-api setup-db     # Add dependency (refuses cycles)
+agmd task dep remove create-api setup-db  # Remove dependency
+
+# View and delete
+agmd task show setup-db                   # Show task content
+agmd task show --all                      # Show all tasks with content
+agmd task delete setup-db --force         # Delete task
+agmd task clean                           # Delete all completed tasks
 ```
 
-See [Migrating Existing Projects](#migrating-existing-projects) for details.
+`task update` changes everything in one locked step and keeps the task's id, dependencies, comments, claim and `created_at`; `updated_at` is set to now. A completed task is refused with `invalid_transition` unless you pass `--force`. `--json` prints `{"ok":true,"action":"update",...}` like the other commands.
 
-## How It Works
+**Compatibility aliases.** Older names still work and keep their JSON `action`: `task edit` = `task update` (it also changes completed tasks without `--force` and never reads stdin), `task blocked-by` = `task dep add`, `task unblock` = `task dep remove`, and `task new --blocked-by a,b` (or `--depends-on a,b`) sets dependencies at creation. Use that shorthand when the new task must never be ready without its dependencies: between `task new` and `task dep add` an agent could claim it.
 
-### 1. Your Personal Registry
+**Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
+**Task types:** bug, feature, task (default, hidden), chore
 
-agmd creates `~/.agmd/` to store your reusable content:
+### Human tasks
 
-```
-~/.agmd/
-├── profile/         # Project templates (default.md, svelte-kit.md, ...)
-└── <your-types>/    # Create any structure you need
-    ├── rule/        # e.g., typescript.md, no-console.md
-    ├── workflow/    # e.g., commit.md, deploy.md
-    ├── prompt/      # e.g., code-review.md
-    └── anything/    # Your own categories
-```
+Some steps only you can do: merge a pull request, log in somewhere, run a root command, make a decision. Create them with `--human` on the same board. Agents are never handed a human task: `task next` and `next --claim` skip it (if only human tasks are ready, the answer is `not_found`), and `task assign` refuses it with `conflict`, even with `--force`. The list shows a `[human]` tag, `task show` a `for: human` line, and JSON output carries `"human": true`.
 
-There are no predefined folders—you create whatever structure makes sense for your workflow. Just use `agmd new type:name` and the type folder is created automatically.
-
-### 2. Simple Directive Syntax
-
-Reference items with clean, readable directives:
-
-```markdown
-# Single item
-:::use rule:typescript
-
-# Multiple items (mixed types)
-:::list
-workflow:commit
-workflow:deploy
-rule:typescript
-:::end
-
-# Inline definition (for project-specific content)
-:::new rule:custom-auth
-Your custom content here
-:::end
-```
-
-### 3. Sync Everywhere
+To make agent work wait for you, block it on the human task. Completing the human task releases it as usual:
 
 ```bash
-agmd sync              # Expands directives.md → AGENTS.md (file on disk)
-agmd sync --stdout     # Print expanded content to stdout (for hooks)
-agmd sync --diff       # Print only changes since last sync (unified diff)
+agmd task new merge-pr --human -p 0 --content "Merge PR #12"
+agmd task new deploy --blocked-by merge-pr --content "Deploy after the merge"   # blocked from the start
+agmd task status merge-pr completed       # deploy becomes ready for agents
 ```
 
-- `:::use` and `:::list` directives expand to full content from registry
-- `:::new` blocks must be promoted first with `agmd promote`
-- `--stdout` and `--diff` enable a file-less workflow via hooks (no AGENTS.md on disk)
-
-Update a rule in your registry, run `agmd sync` in each project, done.
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `agmd setup` | Initialize your `~/.agmd/` registry |
-| `agmd init [profile:name]` | Create `directives.md` in current project |
-| `agmd sync` | Generate `AGENTS.md` from `directives.md` |
-| `agmd sync --stdout` | Print expanded content to stdout (for hooks) |
-| `agmd sync --diff` | Print only changes since last sync (unified diff) |
-| `agmd edit [type:name]` | Edit `directives.md` (default) or a registry item |
-| `agmd new type:name` | Create a new item in the registry |
-| `agmd show type:name` | Display item content (useful for AI assistants) |
-| `agmd list [type]` | List registry items (all types or specific type) |
-| `agmd promote` | Promote `:::new` blocks to registry (required before sync) |
-| `agmd migrate <file>` | Migrate a raw CLAUDE.md/AGENTS.md to agmd format |
-| `agmd collect [-f file]` | Collect rules from an agmd project into your registry |
-| `agmd task <action>` | Manage project tasks (list, new, show, delete, status, ...) |
-| `agmd file <action>` | Manage raw files - scripts, configs (list, new, add, show, delete) |
-| `agmd doc <action>` | Manage documentation folders (list, add, show, delete, link, unlink) |
-| `agmd skill <action>` | Manage AI skills (link, unlink, list) |
-| `agmd git <args>` | Run any git command in `~/.agmd` from anywhere |
-
-## Migrating Existing Projects
-
-Two commands help you work with existing projects:
-
-| Command | Use when... | Result |
-|---------|-------------|--------|
-| `migrate` | Project has raw/unstructured AI instructions (not using agmd) | Content → `directives.md` (for organizing) |
-| `collect` | Project already uses agmd (has `directives.md`) | Rules → `~/.agmd/` (for reuse) |
-
-### Migrate: For Raw/Unstructured Files
-
-Use `migrate` when a project has a freeform AI instruction file that doesn't use agmd yet:
+**Checked automatically.** A step is often done outside the board (you merged on GitHub, or ran the command), and nobody ticks the task. Give a human task a check, a shell command whose exit 0 means the step is done: `task new --human --check "<cmd>"` or `task update <task> --check "<cmd>"` (`--check ""` clears it). A check is refused on a task that is not for the human. `agmd task check [--project p]` runs the checks of all open human tasks with `sh -c` in the current folder (`AGMD_PROJECT` and `AGMD_TASK` are set), each killed after `--timeout` (default `30s`). A task whose check exits 0 is completed with the comment `verified automatically: <first output line>` (author `--author`, else `$AGMD_AUTHOR`, else `check`), which releases its dependents as usual. Stdout gets one line per completed task, `<project>/<task>`, and nothing else; `--verbose` reports the checks that did not pass on stderr, and `--json` lists both. A check stored on a task that is not flagged human is never run. `task show` prints the check.
 
 ```bash
-agmd migrate CLAUDE.md              # Creates directives.md and opens editor
-agmd migrate CLAUDE.md --force      # Overwrite existing directives.md
+agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
+agmd task check --project myproj          # prints "myproj/merge-pr" once the PR is merged
 ```
 
-The command:
-1. Creates a backup of your file (`CLAUDE.md.backup`)
-2. Copies content to `directives.md` with a guide header
-3. Opens your editor to organize with `:::new` markers
+**Replaced tasks.** When a task is renamed, split or superseded, close it instead of leaving a comment: `agmd task replace <old> --by <new>` completes the old task, records `replaced_by` on it and `replaces` on the new one, moves tasks that depended on the old task to the new one (so they wait for the replacement), releases a claim on the old task and comments on both. It fails with `invalid_transition` if the old task is already completed and with `conflict` if moving a dependent would create a cycle. `task list` and `task show` print `replaced by <new>`; JSON carries `replaced_by` and `replaces`. Never leave a replaced task open.
 
-Wrap sections you want to reuse:
+**Moving a task.** `agmd task move <task> --to-project <project>` moves a task that was filed in the wrong project. It keeps its name, id, text, fields (human flag, check, priority…), comments and `created_at`/`completed_at`; `updated_at` records the move and the task gets the comment `Moved from project '<from>'.` (`--author`, else `$AGMD_AUTHOR`, else `user`). The move holds the locks of both projects (taken in name order, so opposite moves cannot deadlock). It fails with `conflict` when the task has dependencies or dependents (they would cross projects; remove them with `task dep remove` first), when the target already has a task of that name or id, or while another workflow holds a claim on it; pass `--workflow-id` to move your own claim along. `--json` prints `{"ok":true,"action":"move","project":"<to>","from_project":"<from>",...}`. `task replace --by` still only accepts a task of the same project: move the replacement first if needed.
 
-```markdown
-:::new rule:typescript
-# TypeScript Standards
-Use strict mode. Avoid `any` type.
-:::
+**Lint.** `agmd task lint [--project p] [--all]` lists tasks named `human-…` that are not flagged human (they are hidden from `list --human`; fix with `task update <task> --human`) and open tasks with a comment stating they were `replaced by <task>` or `superseded by <task>` (fix with `task replace`). `<task>` must be a task of the project, a `<project>/<task>` reference or a hyphenated name, and a plan or negation (“should be replaced by…”, “not replaced by…”) does not count. Only open tasks are listed; `--all` also checks completed ones. One line per finding, `<project>/<task> <kind>: <detail>`; `--json` for programs. The exit status is 0 either way.
 
-:::new workflow:deploy
-# Deploy Process
-Steps for deployment...
-:::
-```
+### Undoing a completion
 
-Then run `agmd promote` to save them to your registry, followed by `agmd sync` to generate AGENTS.md.
+A completed task can't change status again, but it isn't final until something was built on it. `agmd task reopen <task>` puts it back to pending as long as no task that depends on it is claimed, in progress or completed; dependents that were only ready become blocked again. Otherwise it fails with `conflict`, naming the dependent. Chains follow from this: if completing `a` released `b` and `b` is completed, `a` can no longer be reopened. The reopen is recorded as a comment (`--author`, else `$AGMD_AUTHOR`, else `user`). Reopen is meant for the human (for example a mis-tap in an app); agents should not reopen tasks they did not complete.
 
-### Collect: For agmd-Compatible Projects
-
-Use `collect` when a project already uses agmd (has `directives.md` with `:::use` directives):
+To leave room for an undo, complete with `--hold <duration>` (for example `10s` or `2m`, at most `1h`). The task is completed at once, but its dependents stay blocked, and no agent can claim them, until the hold has passed (rounded up to the second); a reopen during the hold always succeeds. There is no timer: every reader compares the time when it looks. `task show` notes `counts from HH:MM:SS` and JSON output carries `hold_until` while the hold runs.
 
 ```bash
-agmd collect                    # Collect from AGENTS.md (default)
-agmd collect -f CLAUDE.md       # Collect from CLAUDE.md instead
+agmd task status merge-pr completed --hold 2m
+agmd task reopen merge-pr --author app    # within 2 minutes: nobody has started deploy
 ```
 
-This parses `directives.md` to find referenced items and extracts their expanded content from the output file, saving them to `~/.agmd/` for reuse in other projects.
+Tasks are auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Dependencies are validated when they are added: the dependency must exist, and `task dep add` refuses a link that would make a task depend on itself, directly or through other tasks (`conflict`).
 
-## Profiles
+## Projects
 
-Bootstrap new projects instantly with profiles:
+The project is derived from the repository you run agmd in. In a Git worktree, agmd resolves to the main repository, so every worktree of a repo shares one task list. Override it with `--project <name>` or `--repo-path <path>`.
 
 ```bash
-# Save current project as a template
-agmd new profile:svelte-kit
-
-# Use it in a new project
-agmd init profile:svelte-kit
+agmd task emoji 🚀                        # Show an emoji next to the project name
 ```
 
-Profiles are complete `directives.md` templates for specific tech stacks.
+## Agents
 
-## Hook-Based Workflow (File-less)
+agmd is built for several agents working on the same project at once. Each agent picks a workflow id and claims work with one command:
 
-For Claude Code, you can skip AGENTS.md entirely and serve content via hooks:
+```bash
+agmd task next --claim --workflow-id agent-1 --json   # Claim the next ready task
+agmd task comment setup-db "Schema migrated" --author agent-1   # Log progress
+agmd task status setup-db completed                   # Finish it
+agmd task unassign setup-db                           # Release the claim (back to pending if unfinished)
+```
+
+`task show` numbers comments from `#1` (oldest). `agmd task comment <task> --delete <n> --author <you>` deletes comment `n`; a comment by another author is refused with `conflict` unless you pass `--force` (for example to remove a personal detail an agent posted).
+
+`next --claim` atomically picks the highest-priority agent task (never a [human task](#human-tasks)) that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
+
+`agmd task --help` is the whole agent reference in one screen (command matrix, update and dependency patterns, claiming, human tasks, JSON, exit codes, examples); an agent can read it once per session instead of each command's help.
+
+### Stale claims
+
+If an agent dies mid-task, its claim expires so the work isn't stuck. A claim stays alive while its workflow shows signs of life: claiming or resuming with `next --claim`, `agmd task heartbeat --workflow-id agent-1`, or a comment whose `--author` is the workflow id. After `--stale-after` without any (default `$AGMD_CLAIM_TTL`, else `2h`; `0` disables expiry), `next --claim` may hand the task to another workflow (`"action":"takeover"`, `"taken_over_from":"agent-1"`) and records the takeover as a comment. Ready, unclaimed tasks are still preferred over stale ones of the same priority, and a task whose dependencies aren't done is never handed out.
+
+```bash
+agmd task heartbeat --workflow-id agent-1             # Refresh all of agent-1's claims
+agmd task heartbeat setup-db --workflow-id agent-1    # Fails with "conflict" if the claim was lost
+AGMD_CLAIM_TTL=30m agmd task next --claim --workflow-id agent-2
+```
+
+### Comments
+
+Comments are a progress log on a task, shown by `agmd task show`, included in `--json` output, and can be added from the web board. The author defaults to `$AGMD_AUTHOR`, or `user`.
+
+### JSON and errors
+
+Every `agmd task` command takes `--json`. Errors are printed to stderr as `{"error":{"code":"...","message":"..."}}` with a non-zero exit status, so agents can branch on the code:
+
+| Code | Exit | Meaning |
+| --- | --- | --- |
+| `invalid_input` | 2 | Bad arguments |
+| `not_found` | 3 | No such task, or nothing ready for `next` |
+| `project_mismatch` | 4 | Task reference names another project |
+| `invalid_transition` | 5 | Status change not allowed (leaving completed other than by `reopen`, or reopening a task that isn't completed) |
+| `conflict` | 6 | Task already assigned to another workflow (`assign --force` takes it over), a task for the human, or a reopen refused because a dependent was already claimed, started or completed |
+
+```bash
+agmd task list --json --status ready
+agmd task assign setup-db --workflow-id agent-1 --worktree-path ../wt-1
+agmd task unassign --all --workflow-id agent-1
+```
+
+### Task list JSON
+
+`agmd task list --json` is flat and stable: one object per task, nothing nested beyond what is shown. `depends_on` lists the references as stored (task names); `dependencies` lists the same tasks resolved to their canonical `id` and `name` (a reference that matches no task keeps its name and gets `"missing": true`, no id). `pending_dependencies` appears on blocked tasks only. Fields such as `feature`, `human`, `check` and `assignment` are left out when empty.
 
 ```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "agmd sync --stdout"
-      }]
-    }]
-  }
-}
+{"project":"demo","tasks":[
+  {"id":"tsk_eaf579d3d99c6f8b","name":"setup-db","project":"demo","subject":"Setup Db","status":"pending","computed_status":"ready","priority":2,"type":"task","depends_on":[],"dependencies":[]},
+  {"id":"tsk_33cbcfa186886107","name":"create-api","project":"demo","subject":"Create Api","status":"pending","computed_status":"blocked","priority":2,"type":"task","depends_on":["setup-db"],"dependencies":[{"id":"tsk_eaf579d3d99c6f8b","name":"setup-db"}],"pending_dependencies":["setup-db"]}],
+ "counts":{"total":2,"ready":1,"blocked":1,"in_progress":0,"completed":0}}
 ```
 
-Add this to `.claude/settings.json` (project) or `~/.claude/settings.json` (global). The agent gets fresh context at every session start and after compaction — no AGENTS.md file needed.
+`agmd task list --json --tree` returns the same object plus `edges`, one per dependency of each listed task, for drawing the graph: `from` depends on `to`. `satisfied` says whether `to` is done; `to` may be absent from `tasks` (completed and hidden without `--all`, filtered out, or `missing`). Timestamps are left out of both examples.
 
-## Works With Any AI Assistant
+```json
+{"project":"demo","tasks":[...same as above...],"counts":{...},
+ "edges":[{"from":"create-api","from_id":"tsk_33cbcfa186886107","to":"setup-db","to_id":"tsk_eaf579d3d99c6f8b","satisfied":false}]}
+```
 
-agmd generates standard markdown that works with:
+Concurrent use is safe: every change to a project's files happens under a per-project file lock (`<project>/.lock`), and files are replaced atomically, so the web board and any number of CLI agents can work side by side.
 
-- **Claude Code** (`CLAUDE.md` or hooks)
-- **Cursor** (`.cursorrules` or project instructions)
-- **Windsurf** (project context)
-- **GitHub Copilot** (repository context)
-- **Any AI** that reads markdown instructions
-
-## Example Workflow
+## Web board
 
 ```bash
-# 1. Create your master TypeScript rule once
-agmd new rule:typescript
-# (Opens editor - add your TypeScript standards)
-
-# 2. Use it in project A
-cd ~/projects/frontend-app
-agmd init
-agmd edit              # Add :::use rule:typescript
-agmd sync
-# → AGENTS.md now has your TypeScript standards
-
-# 3. Use the same rule in project B
-cd ~/projects/api-server
-agmd init
-agmd edit              # Add :::use rule:typescript
-agmd sync
-# → Same standards, zero copy-paste
-
-# 4. Update the rule, sync wherever needed
-agmd edit rule:typescript
-cd ~/projects/frontend-app && agmd sync
+agmd task web                             # Serve on a free port and open the browser
+agmd task web --no-open                   # Serve without opening a browser
+agmd task web --port 8765                 # Serve on a fixed port
 ```
 
-## Registry Organization
+`agmd task web` serves a local kanban board over the same task files (no build step, works offline):
 
-Organize with subdirectories:
+- **Columns** follow each task's state: Blocked (waiting on dependencies), Ready, In progress and Done. Drag a card to change its status. Marking a task done asks first, because the board can't undo it (`agmd task reopen` can, until something was built on it); moving a task a live agent holds back to Ready asks before releasing its claim.
+- **Agents at a glance.** Every card shows who holds it: a live agent (green, with its last heartbeat), a stale claim (amber, with its age), a Claude run started from the board (purple), or an in-progress task nobody has claimed. In progress lists stuck work first, and blocked cards name the task they wait on and flag it when that task is stuck.
+- **What needs you.** The header counts open, working, needing-attention and blocked tasks; click a count to filter by it. Projects with stuck work carry an amber badge in the sidebar. The task panel offers one-click Re-queue for in-progress tasks nobody holds, and Release and re-queue for stale claims.
+- **Human tasks** carry a blue *human* badge, and the board won't start a Claude run on them.
+- **Manage tasks.** Create tasks (`n`), edit title, status, priority, type, feature, dependencies and description in the side panel, comment, and delete. Each field saves on its own, so an agent's concurrent change to another field is kept.
+- **Keyboard.** `j`/`k`/`h`/`l` or the arrow keys move between cards, Enter opens one, `x` selects it for a run, `/` filters, `n` creates, Esc closes. Filters and the selected project live in the URL.
+- **Live.** Changes made by agents through the CLI show up within a couple of seconds; if the agmd server stops, the board says so instead of showing stale data as live.
+- **Light and dark** themes follow the system, or pick one in the sidebar.
 
-```bash
-agmd new rule:frontend/typescript
-agmd new rule:frontend/react
-agmd new rule:backend/api-design
-```
+The board can also **run tasks with Claude Code**: select cards (shift-click, `x`, or the corner checkbox) or open one, click Run, and pick a permission mode (it starts on `acceptEdits` and remembers your last choice; blocked and done tasks are left out). agmd starts a `claude` session with a `/goal` prompt, moves the tasks to in progress and claims them as workflow `web-<session-id>` (kept alive while the run is going). The run's transcript streams into a console, and every run stays available from **Runs** in the sidebar, with a `claude --resume <id>` command to continue it.
 
-Reference with full path:
+The server binds to `127.0.0.1` and refuses requests from other sites (foreign `Origin` or non-IP `Host`), since it can start processes that modify your files.
 
-```markdown
-:::use rule:frontend/typescript
-:::use rule:backend/api-design
-```
+## Storage
 
-### Reserved Types
-
-Some types have special behavior and dedicated subcommands:
-
-| Type | Command | Description |
-|------|---------|-------------|
-| `task` | `agmd task` | Project tasks with dependencies |
-| `file` | `agmd file` | Raw files without markdown processing |
-| `doc` | `agmd doc` | Documentation folders (symlinked) |
-| `skill` | `agmd skill` | Multi-file AI skills |
-| `profile` | `agmd init profile:name` | Project templates |
-
-Use `agmd new type:name` for all other types (rule, workflow, guideline, prompt, etc.).
+Each task is a markdown file with YAML frontmatter at `~/.agmd/task/<project>/<name>.md`. The frontmatter carries `created_at`, `updated_at` and `completed_at` (RFC 3339, UTC; tasks created before these existed simply lack them), and `completion_counts_at` for a completion with `--hold`. Claims live in `<project>/assignments.json` and comments in `<project>/comments/<task-id>.json`. Set `AGMD_HOME` to use another directory. Because tasks are plain files, you can version `~/.agmd` with git to carry it between machines.
 
 ## Installation
 
@@ -330,8 +245,6 @@ Download binaries from [Releases](https://github.com/GluonGrid/agmd/releases).
 
 ### Shell Completion
 
-Enable tab completion for commands, types, and item names:
-
 ```bash
 # Bash (add to ~/.bashrc)
 eval "$(agmd completion bash)"
@@ -343,256 +256,6 @@ eval "$(agmd completion zsh)"
 agmd completion fish | source
 ```
 
-Restart your shell or source the config file to enable completions.
-
-## Configuration
-
-agmd works out of the box with sensible defaults:
-
-- Registry: `~/.agmd/`
-- Source file: `directives.md`
-- Output file: `AGENTS.md`
-
-## Sync Across Devices
-
-Use `agmd git` to run any git command in `~/.agmd` from anywhere — no need to `cd` first:
-
-```bash
-# One-time setup
-agmd git init
-agmd git remote add origin git@github.com:you/agmd-registry.git
-agmd git add -A && agmd git commit -m "init" && agmd git push
-
-# On another machine
-git clone git@github.com:you/agmd-registry.git ~/.agmd
-
-# Daily sync
-agmd git add -A && agmd git commit -m "sync" && agmd git push
-agmd git pull
-agmd git status
-agmd git log --oneline
-```
-
-All flags pass straight through to git — use any git command you know.
-
-## Local Registry (Team Sharing)
-
-Share project-specific rules with your team by committing a `.agmd/` folder:
-
-```bash
-# Set up a local registry alongside directives.md
-agmd init --local
-
-# Create team-shared rules (goes to .agmd/, not ~/.agmd/)
-agmd new rule:our-coding-style --local
-agmd new guide:architecture --local
-
-# Commit it with the project
-git add .agmd/ && git commit -m "add team rules"
-```
-
-**Resolution order** — local takes priority over global:
-
-1. `.agmd/rule/foo.md` — project-local (team-shared, committed to git)
-2. `~/.agmd/rule/foo.md` — global (personal, synced via `agmd git`)
-
-Teammates clone the repo and `agmd sync` automatically picks up local rules without any extra setup.
-
-## Personal Overrides (directives.local.md)
-
-For machine-specific or personal directives you don't want committed, create `directives.local.md` alongside `directives.md`:
-
-```bash
-# Create your personal overrides (automatically gitignored by agmd init)
-touch directives.local.md
-
-# Add personal directives — only you see these
-echo ":::use rule:my-local-tool" >> directives.local.md
-```
-
-`agmd sync` automatically merges `directives.local.md` into the output if it exists. It's appended after `directives.md`, so your overrides always win. The file is added to `.gitignore` automatically by `agmd init`.
-
-**When to use it:**
-- Machine-specific tools or paths only available on your machine
-- Personal coding preferences your team hasn't agreed on
-- Experimental rules you're testing before proposing to the team
-- Rules from your global `~/.agmd` you want active only in this project
-
-## Philosophy
-
-1. **DRY for AI instructions** - Write once, reference everywhere
-2. **Scannable source** - `directives.md` is short and readable at a glance
-3. **Complete output** - `AGENTS.md` has full expanded context for AI
-4. **Personal registry** - Your standards, your way
-5. **Simple syntax** - Learn 3 directives: `:::use`, `:::list`, `:::new`
-
-## Task Management
-
-agmd includes project-based task tracking with dependencies:
-
-```bash
-# Create tasks with priority and type
-agmd task new setup-db --content "Set up database schema"
-agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
-agmd task new add-dark-mode -t feature -p 1 --content "Add dark mode"
-agmd task new create-api --content "Create endpoints" --blocked-by "setup-db"
-agmd task new setup-db --feature auth     # Scope task to a feature
-
-# List tasks (auto-sorted: P0→P4, then ready → blocked → completed)
-agmd task list                            # All tasks for current project
-agmd task list --type bug --priority 0    # Critical bugs only
-agmd task list --feature auth             # Filter by feature
-agmd task list --status ready             # Filter by computed status
-agmd task list --tree                     # Show dependency tree
-agmd task list --all                      # Include completed tasks
-
-# Manage status and dependencies
-agmd task status setup-db completed       # Update status
-agmd task edit setup-db --priority 0 --type bug  # Change priority/type
-agmd task blocked-by create-api setup-db  # Add dependency
-agmd task unblock create-api setup-db     # Remove dependency
-
-# View and delete
-agmd task show setup-db                   # Show task content
-agmd task show --all                      # Show all tasks with content
-agmd task delete setup-db --force         # Delete task
-agmd task clean                           # Delete all completed tasks
-```
-
-**Priority levels:** P0 (critical), P1 (high), P2 (medium/default, hidden), P3 (low), P4 (backlog)
-**Task types:** bug, feature, task (default, hidden), chore
-
-Tasks are stored in `~/.agmd/task/<project>/` and auto-sorted by priority then status. The `--tree` view groups tasks by feature and shows dependency chains. Use `--feature` to scope tasks to features. The `--status`, `--priority`, and `--type` flags filter the list. Dependencies via `--blocked-by` are validated on creation.
-
-## File Management
-
-Store raw files (scripts, configs, templates) without markdown processing:
-
-```bash
-# Add files to registry
-agmd file new setup.sh --content "#!/bin/bash\necho hello"
-agmd file add ./scripts/deploy.sh           # Copy existing file
-agmd file add ./config.json settings.json   # Copy with new name
-
-# List and view
-agmd file list                              # List all files
-agmd file show setup.sh                     # Display file content
-
-# Delete
-agmd file delete setup.sh                   # Delete with confirmation
-agmd file delete setup.sh --force           # Skip confirmation
-```
-
-Files are stored as-is in `~/.agmd/file/` without frontmatter processing. Use profiles with a `files:` field to copy files into projects on `agmd init`.
-
-## Documentation Folders
-
-Manage multi-file documentation that can be symlinked into projects:
-
-```bash
-# Add documentation to registry
-agmd doc add ./docs svelte-kit              # Copy docs folder
-agmd doc add ./reference api --force        # Overwrite existing
-
-# List and view
-agmd doc list                               # List all docs
-agmd doc show svelte-kit                    # Show folder contents
-
-# Link into projects (creates symlink)
-agmd doc link svelte-kit                    # Creates docs/svelte-kit → ~/.agmd/doc/svelte-kit
-agmd doc link svelte-kit ./reference        # Custom destination
-agmd doc link svelte-kit --gitignore        # Also add to .gitignore
-
-# Unlink
-agmd doc unlink svelte-kit                  # Remove symlink
-
-# Delete from registry
-agmd doc delete svelte-kit
-```
-
-Docs are stored in `~/.agmd/doc/` as folders. Unlike files (which are copied), docs are symlinked into projects for easy updates.
-
-Use the `:::docs` directive in `directives.md` to automatically list linked documentation:
-
-```markdown
-:::docs           # Lists all symlinked docs in ./docs/
-:::docs ./ref     # Lists symlinked docs in ./ref/
-```
-
-## Skills
-
-Bundle reusable multi-file capabilities that AI agents can discover and use:
-
-```bash
-# Link a skill into the current project
-agmd skill link managing-agmd
-
-# List linked skills
-agmd skill list
-
-# Unlink a skill
-agmd skill unlink managing-agmd
-```
-
-Skills are stored in `~/.agmd/skill/` and can contain multiple files. Use the `:::skills` directive in `directives.md` to list available skills:
-
-```markdown
-:::skills
-managing-agmd
-my-other-skill
-:::end
-```
-
-Linked skills are automatically discovered by AI agents during sessions.
-
-## AI Assistant Integration
-
-agmd is designed to be used by AI coding assistants. All commands support non-interactive modes:
-
-```bash
-# Read content without opening editor
-agmd show rule:typescript
-agmd show rule:typescript --raw    # Include frontmatter
-agmd file show script.sh           # Show raw file
-agmd doc show my-docs              # Show doc folder contents
-
-# Create items without editor
-agmd new rule:test --no-editor
-agmd new rule:test --content "# My Rule\nContent here"
-echo "# My Rule" | agmd new rule:test
-agmd file new script.sh --content "#!/bin/bash"
-
-# Update items without editor
-agmd edit rule:test --content "# Updated content"
-echo "New content" | agmd edit rule:test
-
-# Sync for hooks (no file on disk)
-agmd sync --stdout                 # Full expanded content to stdout
-agmd sync --diff                   # Only changes since last sync
-
-# Task management
-agmd task new setup-db --content "Set up database"
-agmd task status setup-db completed
-agmd task show --all               # Show all tasks with content
-```
-
-## Roadmap
-
-Planned features for future releases:
-
-- **Learning system** - Auto-capture agent learnings into the registry with hook-based context injection
-- **`agmd hooks install`** - Automatic hook configuration for supported AI agents
-- **Multiple output targets** - Support for `directives.test.md` → `TEST.md` and other custom mappings
-- **Registry sharing** - Import/export registries, share rule packs with teams
-
-## Contributing
-
-Contributions welcome! Please read the contributing guidelines first.
-
 ## License
 
 MIT
-
----
-
-**agmd** - Your AI instructions, organized.

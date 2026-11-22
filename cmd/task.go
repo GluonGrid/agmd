@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"agmd/pkg/registry"
 
@@ -17,16 +22,34 @@ import (
 
 // Task represents a task with its metadata
 type Task struct {
-	Name        string   `yaml:"-"`
-	Subject     string   `yaml:"subject"`
-	Status      string   `yaml:"status"`
-	Priority    int      `yaml:"priority,omitempty"`  // 0-4 (P0=critical, P4=backlog)
-	Type        string   `yaml:"type,omitempty"`      // bug, feature, task, chore
-	Feature     string   `yaml:"feature,omitempty"`
-	DependsOn   []string `yaml:"depends_on"`
-	Content     string   `yaml:"-"`
-	FilePath    string   `yaml:"-"`
-	ProjectName string   `yaml:"-"`
+	Name      string   `yaml:"-"`
+	ID        string   `yaml:"id,omitempty"`
+	Subject   string   `yaml:"subject"`
+	Status    string   `yaml:"status"`
+	Priority  int      `yaml:"priority,omitempty"` // 0-4 (P0=critical, P4=backlog)
+	Type      string   `yaml:"type,omitempty"`     // bug, feature, task, chore
+	Feature   string   `yaml:"feature,omitempty"`
+	DependsOn []string `yaml:"depends_on"`
+	Human     bool     `yaml:"human,omitempty"` // a step only the human can do; never handed to agents
+	// Check is a shell command for a human task: exit 0 means the step is
+	// done, and `task check` completes the task (see task_check.go).
+	Check string `yaml:"check,omitempty"`
+	// ReplacedBy names the task that replaced this one; Replaces lists the
+	// tasks this one replaced (see task_replace.go).
+	ReplacedBy string   `yaml:"replaced_by,omitempty"`
+	Replaces   []string `yaml:"replaces,omitempty"`
+	// Timestamps are RFC 3339 UTC strings. Tasks written before they existed
+	// have none; leave them empty rather than inventing values.
+	CreatedAt   string `yaml:"created_at,omitempty"`
+	UpdatedAt   string `yaml:"updated_at,omitempty"`
+	CompletedAt string `yaml:"completed_at,omitempty"`
+	// CompletionCountsAt is set by `task status completed --hold`: before
+	// this time the completion does not release dependents (see
+	// dependencySatisfied).
+	CompletionCountsAt string `yaml:"completion_counts_at,omitempty"`
+	Content            string `yaml:"-"`
+	FilePath           string `yaml:"-"`
+	ProjectName        string `yaml:"-"`
 }
 
 // Valid task types
@@ -35,6 +58,13 @@ var validTaskTypes = map[string]bool{
 	"feature": true,
 	"task":    true,
 	"chore":   true,
+}
+
+// Valid stored task statuses (computed statuses like "ready"/"blocked" are derived).
+var validTaskStatuses = map[string]bool{
+	"pending":     true,
+	"in_progress": true,
+	"completed":   true,
 }
 
 // ComputedStatus represents the computed status of a task
@@ -49,11 +79,14 @@ const (
 
 // Shared flags for task subcommands
 var taskProject string
+var taskRepoPath string
+var taskJSON bool
 var taskFeature string
 var taskAll bool
 var taskForce bool
 var taskContent string
 var taskBlockedBy string
+var taskDependsOn string
 var taskNoEditor bool
 var taskRaw bool
 var taskStatus string
@@ -62,47 +95,136 @@ var taskPriority int
 var taskType string
 var taskFilterPriority string
 var taskFilterType string
+var taskWorkflowID string
+var taskWorktreePath string
+var taskUnassignAll bool
+var taskHuman bool
+var taskCheck string
+var taskNoHuman bool
+var taskSort string
+
+type taskAssignment struct {
+	TaskID       string `json:"task_id"`
+	TaskName     string `json:"task_name"`
+	WorkflowID   string `json:"workflow_id"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+type codedTaskError struct {
+	Code     string
+	Message  string
+	ExitCode int
+}
+
+func (e *codedTaskError) Error() string {
+	return e.Message
+}
+
+func (e *codedTaskError) ErrorCode() string {
+	return e.Code
+}
+
+func (e *codedTaskError) ExitStatus() int {
+	if e.ExitCode <= 0 {
+		return 1
+	}
+	return e.ExitCode
+}
+
+func newTaskError(code, format string, args ...interface{}) error {
+	exitCode := 1
+	switch code {
+	case "invalid_input":
+		exitCode = 2
+	case "not_found":
+		exitCode = 3
+	case "project_mismatch":
+		exitCode = 4
+	case "invalid_transition":
+		exitCode = 5
+	case "conflict":
+		exitCode = 6
+	}
+	return &codedTaskError{
+		Code:     code,
+		Message:  fmt.Sprintf(format, args...),
+		ExitCode: exitCode,
+	}
+}
+
+func printJSON(payload interface{}) error {
+	encoder := json.NewEncoder(os.Stdout)
+	return encoder.Encode(payload)
+}
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage project tasks",
-	Long: `Manage project tasks with dependencies, priorities, and status tracking.
+	// Arguments are valid once this runs, so later failures are runtime
+	// errors: print the error alone, not the usage text, to keep agent
+	// output short.
+	// Execute prints the error itself (as JSON with --json), so cobra must not.
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+	},
+	Long: `Task board for agents and humans. Read this once per session.
 
-Tasks are organized by project (based on current directory name).
-Each task has a priority (P0-P4) and type (bug/feature/task/chore).
-Tasks are auto-sorted by priority then status.
+Tasks: ~/.agmd/task/<project>/<name>.md. Project = main repo folder name
+(worktrees share it); override with --project or --repo-path.
+Refer to a task by name or id. Priority -p 0-4 (P0 critical, P2 default).
+Type -t bug|feature|task|chore. Status pending|in_progress|completed;
+computed: ready, blocked (unfinished dependency), in_progress, completed.
 
-Priority levels:
-  P0  critical    Urgent issues requiring immediate attention
-  P1  high        Important tasks to address soon
-  P2  medium      Default priority for normal tasks
-  P3  low         Can be done when time permits
-  P4  backlog     Ideas and future work
+Commands:
+  read          list [--all --status S --feature F --human|--no-human --tree]
+                show <t> [--raw], show --all, next (peek)
+  create        new <t> --content "..." [-p N -t T --feature F]
+  change        update <t> [--content|--content-file|--subject|-p|-t|--feature]
+  dependencies  dep add <t> <dep>, dep remove <t> <dep>
+  lifecycle     next --claim, heartbeat, comment, status, unassign,
+                reopen, replace, move, delete, clean
+  human tasks   new <t> --human [--check CMD], list --human, check
+  checks        check (human-task checks), lint [--all] (forgotten or
+                mislabelled; open tasks only unless --all)
+  other         assign, emoji, web
 
-Task types:
-  bug      Defect to fix
-  feature  New functionality
-  task     General task (default)
-  chore    Maintenance work
+Change a task: one 'update' call sets any mix of text and fields under the
+project lock. Completed tasks need --force. Never edit task files by hand.
 
-Subcommands:
-  list        List tasks (sorted by priority, filterable)
-  new         Create a new task with priority/type
-  edit        Edit task priority or type
-  show        Show task content
-  delete      Delete a task
-  status      Update task status
-  blocked-by  Add a dependency
-  unblock     Remove a dependency
+Dependencies: 'dep add <t> <dep>' makes <t> wait for <dep> (cycles refused);
+'dep remove <t> <dep>' drops it. A blocked task is never handed out.
+'new <t> --depends-on a,b' sets them at creation.
+
+Claiming: 'next --claim --workflow-id W' atomically claims the best ready
+task, or resumes the one W holds. Claims idle over 2h ($AGMD_CLAIM_TTL) can
+be taken over: keep them alive with 'heartbeat [<t>] --workflow-id W' or
+'comment <t> "..." --author W'. Finish: 'status <t> completed'. Give up:
+'unassign <t>' (back to pending).
+
+Human tasks (--human) are never handed to agents. 'check' runs their --check
+commands and completes those that exit 0.
+
+Undo: 'reopen <t>' undoes a completion while no dependent is claimed or
+done; 'status <t> completed --hold 2m' delays releasing dependents.
+'replace <old> --by <new>' closes <old> and moves its dependents to <new>.
+'move <t> --to-project P' keeps id and comments; refused with dependencies.
+'comment <t> --delete N' deletes comment #N (yours, or --force).
+
+JSON: --json on every command; errors are one JSON line on stderr.
+Exit codes: 0 ok, 1 other, 2 invalid_input, 3 not_found (also: nothing to
+claim), 4 project_mismatch, 5 invalid_transition, 6 conflict.
 
 Examples:
-  agmd task list                                    # List all tasks
-  agmd task list --type bug --priority 0           # Critical bugs only
-  agmd task new fix-auth -t bug -p 0 --content "Fix login"
-  agmd task new setup-db --content "Set up DB"      # Create task (P2, task)
-  agmd task edit setup-db -p 0 -t bug              # Change priority and type
-  agmd task status setup-db completed               # Update status
-  agmd task blocked-by create-api setup-db          # Add dependency`,
+  agmd task next --claim --workflow-id W --json | jq -r .task.name
+  agmd task update fix-auth -p 0 --content "Repro: ..." --json
+  agmd task new deploy --content "Deploy" && agmd task dep add deploy fix-auth
+  agmd task list --json | jq '.tasks[] | {name, computed_status, dependencies}'
+
+Aliases (compatibility, prefer the names above): edit = update,
+blocked-by = dep add, unblock = dep remove, new --blocked-by = --depends-on.
+Details: agmd task <command> --help`,
 }
 
 var taskListCmd = &cobra.Command{
@@ -112,6 +234,7 @@ var taskListCmd = &cobra.Command{
 	Long: `List tasks for the current project, auto-sorted by priority then status.
 
 Tasks are sorted: P0 → P4, then ready → in_progress → blocked → completed.
+Use --sort age to list the oldest-created tasks first instead.
 Completed tasks are hidden by default (use --all to show).
 
 Filters:
@@ -130,6 +253,8 @@ Examples:
   agmd task list --type bug                 # Only bugs
   agmd task list --type bug --priority 0    # Critical bugs only
   agmd task list --tree                     # Show dependency tree
+  agmd task list --json --tree              # JSON with dependency edges
+  agmd task list --sort age                 # Oldest tasks first
   agmd task list --project myproj           # List tasks for specific project`,
 	RunE: runTaskList,
 }
@@ -142,19 +267,25 @@ var taskNewCmd = &cobra.Command{
 Priority levels: 0=critical, 1=high, 2=medium (default), 3=low, 4=backlog
 Task types: bug, feature, task (default), chore
 
+Dependencies are added with 'agmd task dep add'. --blocked-by (or its
+synonym --depends-on) is a compatibility shorthand that sets them at creation,
+in the same step: use it when the task must never be ready without them.
+
 Examples:
   agmd task new setup-db --content "Set up database"
   agmd task new fix-auth -t bug -p 0 --content "Critical auth bug"
   agmd task new add-dark-mode -t feature -p 2 --content "Add dark mode"
-  agmd task new create-api --content "Create API" --blocked-by "setup-db"
+  agmd task new create-api --content "Create API" && agmd task dep add create-api setup-db
+  agmd task new deploy --blocked-by merge-pr --content "Deploy"   # blocked from the start
   agmd task new setup-db --feature auth --content "Set up auth DB"
+  agmd task new merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
   echo "Task description" | agmd task new setup-db`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskNew,
 }
 
 var taskShowCmd = &cobra.Command{
-	Use:   "show <name>",
+	Use:   "show <task-id-or-name>",
 	Short: "Show task content",
 	Long: `Display the content of a task.
 
@@ -169,7 +300,7 @@ Examples:
 }
 
 var taskDeleteCmd = &cobra.Command{
-	Use:     "delete <name>",
+	Use:     "delete <task-id-or-name>",
 	Aliases: []string{"del", "rm"},
 	Short:   "Delete a task",
 	Long: `Delete a task from the current project.
@@ -185,49 +316,26 @@ Examples:
 }
 
 var taskStatusCmd = &cobra.Command{
-	Use:   "status <task-name> <status>",
+	Use:   "status <task-id-or-name> <status>",
 	Short: "Update task status",
 	Long: `Update the status of a task.
 
 Valid statuses: pending, in_progress, completed
 
+A completed task cannot change status again; 'agmd task reopen' undoes a
+completion while nothing was built on it. With --hold (e.g. 10s, 2m, max 1h)
+the task is completed at once, but its dependents stay blocked until the hold
+has passed, so a mis-tap can be reopened before any agent claims them.
+
 Examples:
   agmd task status setup-db pending
   agmd task status setup-db in_progress
-  agmd task status setup-db completed`,
+  agmd task status setup-db completed
+  agmd task status merge-pr completed --hold 2m`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeTaskStatus,
 	RunE:              runTaskStatus,
 }
-
-var taskBlockedByCmd = &cobra.Command{
-	Use:   "blocked-by <task-name> <dependency>",
-	Short: "Add a dependency to a task",
-	Long: `Add a dependency to a task.
-
-This makes <task-name> depend on <dependency>.
-
-Examples:
-  agmd task blocked-by create-api setup-db    # create-api depends on setup-db`,
-	Args:              cobra.ExactArgs(2),
-	ValidArgsFunction: completeTaskDependency,
-	RunE:              runTaskBlockedBy,
-}
-
-var taskUnblockCmd = &cobra.Command{
-	Use:   "unblock <task-name> <dependency>",
-	Short: "Remove a dependency from a task",
-	Long: `Remove a dependency from a task.
-
-Examples:
-  agmd task unblock create-api setup-db    # Remove setup-db dependency from create-api`,
-	Args:              cobra.ExactArgs(2),
-	ValidArgsFunction: completeTaskDependency,
-	RunE:              runTaskUnblock,
-}
-
-var taskEditPriority int = -1 // -1 means not set
-var taskEditType string
 
 var taskCleanCmd = &cobra.Command{
 	Use:   "clean",
@@ -243,21 +351,37 @@ Examples:
 	RunE: runTaskClean,
 }
 
-var taskEditCmd = &cobra.Command{
-	Use:   "edit <task-name>",
-	Short: "Edit task priority or type",
-	Long: `Edit a task's priority or type.
-
-Use -p/--priority to change priority (0-4 or P0-P4).
-Use -t/--type to change type (bug, feature, task, chore).
-
-Examples:
-  agmd task edit setup-db -p 0              # Set to critical priority
-  agmd task edit setup-db -t bug            # Change type to bug
-  agmd task edit setup-db -p 1 -t feature   # Change both`,
+var taskAssignCmd = &cobra.Command{
+	Use:               "assign <task-id-or-name>",
+	Short:             "Assign a task to a workflow",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTaskName,
-	RunE:              runTaskEdit,
+	RunE:              runTaskAssign,
+}
+
+var taskUnassignCmd = &cobra.Command{
+	Use:   "unassign [task-id-or-name]",
+	Short: "Release task claims (in_progress tasks go back to pending)",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if taskUnassignAll {
+			if len(args) != 0 {
+				return newTaskError("invalid_input", "do not pass a task argument when using --all")
+			}
+			if strings.TrimSpace(taskWorkflowID) == "" {
+				return newTaskError("invalid_input", "--workflow-id is required with --all")
+			}
+			return nil
+		}
+		if len(args) != 1 {
+			return newTaskError("invalid_input", "specify a task id/name or use --workflow-id <id> --all")
+		}
+		if strings.TrimSpace(taskWorkflowID) != "" {
+			return newTaskError("invalid_input", "--workflow-id can only be used with --all")
+		}
+		return nil
+	},
+	ValidArgsFunction: completeTaskName,
+	RunE:              runTaskUnassign,
 }
 
 func init() {
@@ -268,64 +392,340 @@ func init() {
 	taskCmd.AddCommand(taskDeleteCmd)
 	taskCmd.AddCommand(taskStatusCmd)
 	taskCmd.AddCommand(taskCleanCmd)
-	taskCmd.AddCommand(taskBlockedByCmd)
-	taskCmd.AddCommand(taskUnblockCmd)
-	taskCmd.AddCommand(taskEditCmd)
+	taskCmd.AddCommand(taskAssignCmd)
+	taskCmd.AddCommand(taskUnassignCmd)
+	taskCmd.PersistentFlags().BoolVar(&taskJSON, "json", false, "Output machine-readable JSON")
+	// 'agmd task --help' is the one-screen agent reference: print the Long
+	// text alone, without cobra's generated command list, which repeats it.
+	// Subcommands keep the default help.
+	defaultHelp := taskCmd.HelpFunc()
+	taskCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd != taskCmd {
+			defaultHelp(cmd, args)
+			return
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), cmd.Long)
+	})
 
-	// Add --project and --feature flags to subcommands that need them
-	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	// Add --project/--repo-path and --feature flags to subcommands that need them
+	taskListCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskListCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskListCmd.Flags().StringVar(&taskFeature, "feature", "", "Filter tasks by feature")
 	taskListCmd.Flags().BoolVarP(&taskAll, "all", "a", false, "Include completed tasks")
 	taskListCmd.Flags().StringVar(&taskStatus, "status", "", "Filter by computed status (ready, blocked, in_progress, completed)")
 	taskListCmd.RegisterFlagCompletionFunc("status", completeListStatusFlag)
-	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization")
+	taskListCmd.Flags().BoolVar(&taskTree, "tree", false, "Show dependency tree visualization (with --json: add dependency edges)")
 	taskListCmd.Flags().StringVarP(&taskFilterPriority, "priority", "p", "", "Filter by priority (0-4 or P0-P4)")
 	taskListCmd.Flags().StringVarP(&taskFilterType, "type", "t", "", "Filter by type (bug, feature, task, chore)")
+	taskListCmd.Flags().BoolVar(&taskHuman, "human", false, "Only show tasks for the human")
+	taskListCmd.Flags().BoolVar(&taskNoHuman, "no-human", false, "Hide tasks for the human")
+	taskListCmd.Flags().StringVar(&taskSort, "sort", "priority", "Sort order: priority (P0 first, then status) or age (oldest created first)")
 	taskListCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskListCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
-	taskNewCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskNewCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskNewCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskNewCmd.Flags().StringVar(&taskFeature, "feature", "", "Feature/session name for this task")
 	taskNewCmd.Flags().StringVar(&taskContent, "content", "", "Task content/description")
-	taskNewCmd.Flags().StringVar(&taskBlockedBy, "blocked-by", "", "Comma-separated list of task dependencies")
+	taskNewCmd.Flags().StringVar(&taskBlockedBy, "blocked-by", "", "Comma-separated list of task dependencies (compatibility; prefer 'task dep add')")
+	taskNewCmd.Flags().StringVar(&taskDependsOn, "depends-on", "", "Synonym of --blocked-by (compatibility)")
 	taskNewCmd.Flags().BoolVar(&taskNoEditor, "no-editor", false, "Don't open editor after creating")
 	taskNewCmd.Flags().IntVarP(&taskPriority, "priority", "p", 2, "Priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
 	taskNewCmd.Flags().StringVarP(&taskType, "type", "t", "task", "Type (bug, feature, task, chore)")
+	taskNewCmd.Flags().BoolVar(&taskHuman, "human", false, "A step only the human can do; agents never claim it")
+	taskNewCmd.Flags().StringVar(&taskCheck, "check", "", "With --human: shell command whose exit 0 means the step is done (see 'task check')")
 	taskNewCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskNewCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
-	taskShowCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskShowCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskShowCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskShowCmd.Flags().StringVar(&taskFeature, "feature", "", "Filter tasks by feature")
 	taskShowCmd.Flags().BoolVarP(&taskAll, "all", "a", false, "Show all tasks for project")
 	taskShowCmd.Flags().BoolVar(&taskRaw, "raw", false, "Include frontmatter in output")
 
-	taskDeleteCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskDeleteCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskDeleteCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskDeleteCmd.Flags().BoolVarP(&taskForce, "force", "f", false, "Skip confirmation prompt")
 
-	taskStatusCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
-	taskBlockedByCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
-	taskUnblockCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskStatusCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskStatusCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 
-	taskEditCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
-	taskEditCmd.Flags().IntVarP(&taskEditPriority, "priority", "p", -1, "New priority (0=critical, 1=high, 2=medium, 3=low, 4=backlog)")
-	taskEditCmd.Flags().StringVarP(&taskEditType, "type", "t", "", "New type (bug, feature, task, chore)")
-	taskEditCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
-	taskEditCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
-
-	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (default: current directory name)")
+	taskCleanCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskCleanCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
 	taskCleanCmd.Flags().BoolVarP(&taskForce, "force", "f", false, "Skip confirmation prompt")
+
+	taskAssignCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskAssignCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
+	taskAssignCmd.Flags().StringVar(&taskWorkflowID, "workflow-id", "", "Workflow identifier for this assignment")
+	taskAssignCmd.Flags().StringVar(&taskWorktreePath, "worktree-path", "", "Optional worktree path metadata")
+	taskAssignCmd.Flags().BoolVar(&taskForce, "force", false, "Take over a task already assigned to another workflow")
+	taskAssignCmd.MarkFlagRequired("workflow-id") //nolint:errcheck
+
+	taskUnassignCmd.Flags().StringVar(&taskProject, "project", "", "Project name (stable selector, overrides automatic resolution)")
+	taskUnassignCmd.Flags().StringVar(&taskRepoPath, "repo-path", "", "Resolve project from this repository path (worktree-aware)")
+	taskUnassignCmd.Flags().StringVar(&taskWorkflowID, "workflow-id", "", "Workflow identifier to unassign from all tasks (requires --all)")
+	taskUnassignCmd.Flags().BoolVar(&taskUnassignAll, "all", false, "Unassign all tasks matching --workflow-id")
 }
 
-// getProjectName returns the project name (from flag or cwd)
+// getProjectName returns the project name from explicit selector or repository path.
 func getProjectName() (string, error) {
 	if taskProject != "" {
+		if err := validateName("project", taskProject); err != nil {
+			return "", err
+		}
 		return taskProject, nil
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current directory: %w", err)
+
+	targetPath := taskRepoPath
+	explicitRepoPath := taskRepoPath != ""
+	if targetPath == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+		targetPath = cwd
 	}
-	return filepath.Base(cwd), nil
+
+	canonicalRepoPath, err := resolveCanonicalRepoPath(targetPath)
+	if err != nil {
+		if explicitRepoPath {
+			return "", newTaskError("invalid_input", "invalid --repo-path '%s': %v", taskRepoPath, err)
+		}
+		absPath, absErr := filepath.Abs(targetPath)
+		if absErr != nil {
+			return "", fmt.Errorf("failed to resolve project path '%s': %w", targetPath, absErr)
+		}
+		return filepath.Base(absPath), nil
+	}
+	return filepath.Base(canonicalRepoPath), nil
+}
+
+// resolveCanonicalRepoPath resolves path to canonical repo root.
+// In worktrees, this maps to the main repo path from git common dir.
+func resolveCanonicalRepoPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	commonDir, err := gitRevParse(absPath, "--path-format=absolute", "--git-common-dir")
+	if err == nil && commonDir != "" {
+		normalized := filepath.Clean(commonDir)
+		if filepath.Base(normalized) == ".git" {
+			return filepath.Dir(normalized), nil
+		}
+	}
+
+	topLevel, topErr := gitRevParse(absPath, "--path-format=absolute", "--show-toplevel")
+	if topErr == nil && topLevel != "" {
+		return filepath.Clean(topLevel), nil
+	}
+
+	if err != nil {
+		return "", err
+	}
+	return "", topErr
+}
+
+func gitRevParse(path string, args ...string) (string, error) {
+	gitArgs := append([]string{"-C", path, "rev-parse"}, args...)
+	out, err := exec.Command("git", gitArgs...).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("git rev-parse failed for '%s': %s", path, msg)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func computeTaskID(projectName, taskName string) string {
+	sum := sha256.Sum256([]byte(projectName + "::" + taskName))
+	return "tsk_" + hex.EncodeToString(sum[:8])
+}
+
+func ensureTaskIdentity(task *Task, projectName string) {
+	task.ProjectName = projectName
+	if task.ID == "" {
+		task.ID = computeTaskID(projectName, task.Name)
+	}
+}
+
+type taskJSONItem struct {
+	ID                  string              `json:"id"`
+	Name                string              `json:"name"`
+	Project             string              `json:"project"`
+	Subject             string              `json:"subject"`
+	Status              string              `json:"status"`
+	ComputedStatus      string              `json:"computed_status"`
+	Priority            int                 `json:"priority"`
+	Type                string              `json:"type"`
+	Feature             string              `json:"feature,omitempty"`
+	Human               bool                `json:"human,omitempty"`
+	Check               string              `json:"check,omitempty"`
+	ReplacedBy          string              `json:"replaced_by,omitempty"`
+	Replaces            []string            `json:"replaces,omitempty"`
+	DependsOn           []string            `json:"depends_on"`
+	Dependencies        []taskDependencyRef `json:"dependencies"`
+	PendingDependencies []string            `json:"pending_dependencies,omitempty"`
+	CreatedAt           string              `json:"created_at,omitempty"`
+	UpdatedAt           string              `json:"updated_at,omitempty"`
+	CompletedAt         string              `json:"completed_at,omitempty"`
+	HoldUntil           string              `json:"hold_until,omitempty"`
+	Assignment          *taskAssignment     `json:"assignment,omitempty"`
+	Content             string              `json:"content,omitempty"`
+	Comments            []taskComment       `json:"comments,omitempty"`
+}
+
+type taskListJSONPayload struct {
+	Project string         `json:"project"`
+	Feature string         `json:"feature,omitempty"`
+	Tasks   []taskJSONItem `json:"tasks"`
+	Counts  struct {
+		Total      int `json:"total"`
+		Ready      int `json:"ready"`
+		Blocked    int `json:"blocked"`
+		InProgress int `json:"in_progress"`
+		Completed  int `json:"completed"`
+	} `json:"counts"`
+}
+
+type taskMutationJSONPayload struct {
+	OK      bool   `json:"ok"`
+	Action  string `json:"action"`
+	Project string `json:"project"`
+	Task    string `json:"task,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Status  string `json:"status,omitempty"`
+	// HoldUntil is set when a completion only counts from a later time.
+	HoldUntil string `json:"hold_until,omitempty"`
+}
+
+func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string]taskAssignment, includeContent bool) taskJSONItem {
+	taskType := task.Type
+	if taskType == "" {
+		taskType = "task"
+	}
+	status := computeTaskStatus(task, taskMap)
+	item := taskJSONItem{
+		ID:             task.ID,
+		Name:           task.Name,
+		Project:        task.ProjectName,
+		Subject:        task.Subject,
+		Status:         task.Status,
+		ComputedStatus: string(status),
+		Priority:       task.Priority,
+		Type:           taskType,
+		Feature:        task.Feature,
+		Human:          task.Human,
+		Check:          task.Check,
+		ReplacedBy:     task.ReplacedBy,
+		Replaces:       task.Replaces,
+		DependsOn:      task.DependsOn,
+		Dependencies:   resolveTaskDependencies(task, taskMap),
+		CreatedAt:      task.CreatedAt,
+		UpdatedAt:      task.UpdatedAt,
+		CompletedAt:    task.CompletedAt,
+	}
+	if until, held := completionHeldUntil(task, taskNow()); held {
+		item.HoldUntil = until.Format(time.RFC3339)
+	}
+	if status == StatusBlocked {
+		item.PendingDependencies = getPendingDependencies(task, taskMap)
+	}
+	if assignment, exists := assignments[task.ID]; exists {
+		assignmentCopy := assignment
+		item.Assignment = &assignmentCopy
+	}
+	if includeContent {
+		item.Content = task.Content
+	}
+	return item
+}
+
+func buildTaskListJSON(projectName, feature string, tasks []*Task, taskMap map[string]*Task, assignments map[string]taskAssignment, includeContent bool) taskListJSONPayload {
+	payload := taskListJSONPayload{
+		Project: projectName,
+		Feature: feature,
+		Tasks:   make([]taskJSONItem, 0, len(tasks)),
+	}
+	for _, task := range tasks {
+		status := computeTaskStatus(task, taskMap)
+		switch status {
+		case StatusReady:
+			payload.Counts.Ready++
+		case StatusBlocked:
+			payload.Counts.Blocked++
+		case StatusInProgress:
+			payload.Counts.InProgress++
+		case StatusCompleted:
+			payload.Counts.Completed++
+		}
+		payload.Tasks = append(payload.Tasks, taskToJSONItem(task, taskMap, assignments, includeContent))
+	}
+	payload.Counts.Total = len(tasks)
+	return payload
+}
+
+func parseTaskRef(name string) (string, string, bool) {
+	if !strings.Contains(name, "/") {
+		return "", name, false
+	}
+	parts := strings.SplitN(name, "/", 2)
+	return parts[0], parts[1], true
+}
+
+func resolveTaskRef(reg *registry.Registry, projectName, taskRef string) (*Task, error) {
+	// Fast path for name lookup.
+	if !strings.HasPrefix(taskRef, "tsk_") {
+		taskPath := getTaskPath(reg, projectName, taskRef)
+		if _, err := os.Stat(taskPath); err == nil {
+			task, loadErr := loadTask(taskPath)
+			if loadErr != nil {
+				return nil, fmt.Errorf("failed to load task: %w", loadErr)
+			}
+			ensureTaskIdentity(task, projectName)
+			return task, nil
+		}
+	}
+
+	// ID or fallback lookup.
+	tasks, err := loadProjectTasks(reg, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tasks: %w", err)
+	}
+	for _, task := range tasks {
+		if task.ID == taskRef || task.Name == taskRef {
+			return task, nil
+		}
+	}
+	return nil, newTaskError("not_found", "task '%s' not found in project '%s'", taskRef, projectName)
+}
+
+func resolveTaskProjectAndRef(taskArg string) (string, string, error) {
+	projectFromArg, taskRef, hasProjectInArg := parseTaskRef(taskArg)
+	if hasProjectInArg && taskProject != "" && projectFromArg != taskProject {
+		return "", "", newTaskError(
+			"project_mismatch",
+			"task reference '%s' does not match --project '%s'",
+			projectFromArg,
+			taskProject,
+		)
+	}
+
+	projectName := taskProject
+	if hasProjectInArg {
+		projectName = projectFromArg
+	}
+	if projectName == "" {
+		resolved, err := getProjectName()
+		if err != nil {
+			return "", "", err
+		}
+		projectName = resolved
+	}
+	return projectName, taskRef, nil
 }
 
 // getTaskPath returns the path to a task file
@@ -336,6 +736,80 @@ func getTaskPath(reg *registry.Registry, projectName, taskName string) string {
 // getTaskDir returns the path to a project's task directory
 func getTaskDir(reg *registry.Registry, projectName string) string {
 	return filepath.Join(reg.BasePath, "task", projectName)
+}
+
+func getTaskAssignmentsPath(reg *registry.Registry, projectName string) string {
+	return filepath.Join(getTaskDir(reg, projectName), "assignments.json")
+}
+
+func loadTaskAssignments(reg *registry.Registry, projectName string) (map[string]taskAssignment, error) {
+	assignmentsPath := getTaskAssignmentsPath(reg, projectName)
+	raw, err := os.ReadFile(assignmentsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]taskAssignment{}, nil
+		}
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return map[string]taskAssignment{}, nil
+	}
+	assignments := map[string]taskAssignment{}
+	if err := json.Unmarshal(raw, &assignments); err != nil {
+		return nil, fmt.Errorf("invalid assignments file: %w", err)
+	}
+	return assignments, nil
+}
+
+func saveTaskAssignments(reg *registry.Registry, projectName string, assignments map[string]taskAssignment) error {
+	taskDir := getTaskDir(reg, projectName)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		return err
+	}
+	assignmentsPath := getTaskAssignmentsPath(reg, projectName)
+	encoded, err := json.MarshalIndent(assignments, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	return writeFileAtomic(assignmentsPath, encoded, 0o644)
+}
+
+// releaseTask puts an unclaimed in_progress task back to pending, so that
+// `task next --claim` can hand it out again. The caller must hold the project
+// lock.
+func releaseTask(task *Task) error {
+	if task.Status != "in_progress" {
+		return nil
+	}
+	task.Status = "pending"
+	if err := saveTask(task); err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
+	return nil
+}
+
+// dropTaskAssignments removes assignments for the given task IDs. The caller
+// must hold the project lock.
+func dropTaskAssignments(reg *registry.Registry, projectName string, taskIDs ...string) error {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for _, id := range taskIDs {
+		if _, ok := assignments[id]; ok {
+			delete(assignments, id)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return saveTaskAssignments(reg, projectName, assignments)
 }
 
 // loadTask loads a task from file
@@ -371,6 +845,7 @@ func loadTask(filePath string) (*Task, error) {
 	}
 
 	task.Content = strings.TrimSpace(string(body))
+	ensureTaskIdentity(task, filepath.Base(filepath.Dir(filePath)))
 	return task, nil
 }
 
@@ -396,32 +871,14 @@ func extractTaskFrontmatter(content []byte) ([]byte, []byte, error) {
 	return frontmatter, body, nil
 }
 
-// saveTask saves a task to file
+// saveTask saves a task to file, stamping updated_at.
 func saveTask(task *Task) error {
-	// Build frontmatter
-	frontmatter := struct {
-		Subject   string   `yaml:"subject"`
-		Status    string   `yaml:"status"`
-		Priority  int      `yaml:"priority,omitempty"`
-		Type      string   `yaml:"type,omitempty"`
-		Feature   string   `yaml:"feature,omitempty"`
-		DependsOn []string `yaml:"depends_on"`
-	}{
-		Subject:   task.Subject,
-		Status:    task.Status,
-		Priority:  task.Priority,
-		Type:      task.Type,
-		Feature:   task.Feature,
-		DependsOn: task.DependsOn,
-	}
-
-	fmBytes, err := yaml.Marshal(frontmatter)
+	task.UpdatedAt = taskTimestamp(taskNow())
+	data, err := encodeTask(task)
 	if err != nil {
 		return err
 	}
-
-	content := fmt.Sprintf("---\n%s---\n\n%s\n", string(fmBytes), task.Content)
-	return os.WriteFile(task.FilePath, []byte(content), 0644)
+	return writeFileAtomic(task.FilePath, data, 0644)
 }
 
 // loadProjectTasks loads all tasks for a project
@@ -447,7 +904,7 @@ func loadProjectTasks(reg *registry.Registry, projectName string) ([]*Task, erro
 		if err != nil {
 			continue
 		}
-		task.ProjectName = projectName
+		ensureTaskIdentity(task, projectName)
 		tasks = append(tasks, task)
 	}
 
@@ -464,14 +921,10 @@ func computeTaskStatus(task *Task, allTasks map[string]*Task) ComputedStatus {
 		return StatusInProgress
 	}
 
-	// Check if blocked by any pending dependencies
+	// Blocked while any dependency is missing or not yet done.
+	now := taskNow()
 	for _, dep := range task.DependsOn {
-		depTask, exists := allTasks[dep]
-		if !exists {
-			// Dependency doesn't exist, consider it blocking
-			return StatusBlocked
-		}
-		if depTask.Status != "completed" {
+		if !dependencySatisfied(allTasks[dep], now) {
 			return StatusBlocked
 		}
 	}
@@ -520,16 +973,39 @@ func sortTasksByPriorityAndStatus(tasks []*Task, allTasks map[string]*Task) []*T
 	return sorted
 }
 
+// sortTasksByAge orders tasks oldest-created first. Tasks without created_at
+// (written before timestamps existed) keep their order at the end.
+func sortTasksByAge(tasks []*Task) {
+	sort.SliceStable(tasks, func(i, j int) bool {
+		ci, cj := tasks[i].CreatedAt, tasks[j].CreatedAt
+		if ci == "" || cj == "" {
+			return ci != "" && cj == ""
+		}
+		return ci < cj
+	})
+}
+
 // getPendingDependencies returns the list of pending dependencies
 func getPendingDependencies(task *Task, allTasks map[string]*Task) []string {
 	var pending []string
+	now := taskNow()
 	for _, dep := range task.DependsOn {
-		depTask, exists := allTasks[dep]
-		if !exists || depTask.Status != "completed" {
+		if !dependencySatisfied(allTasks[dep], now) {
 			pending = append(pending, dep)
 		}
 	}
 	return pending
+}
+
+// filterTasksByHuman keeps only human tasks (human=true) or only agent tasks.
+func filterTasksByHuman(tasks []*Task, human bool) []*Task {
+	var filtered []*Task
+	for _, t := range tasks {
+		if t.Human == human {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }
 
 // filterTasksByFeature returns only tasks matching the given feature
@@ -555,6 +1031,14 @@ func parsePriority(s string) (int, error) {
 		return int(s[0] - '0'), nil
 	}
 	return 0, fmt.Errorf("invalid priority '%s'. Use 0-4 or P0-P4", s)
+}
+
+// humanTag marks a task only the human can do in plain-text lists.
+func humanTag(t *Task) string {
+	if !t.Human {
+		return ""
+	}
+	return " " + color.New(color.FgCyan).Sprint("[human]")
 }
 
 // formatPriorityType returns a colored "P0:bug" style tag
@@ -689,6 +1173,7 @@ func printDependencyTree(tasks []*Task, taskMap map[string]*Task, showAll bool, 
 		if prioType != "" {
 			prioType = " " + prioType
 		}
+		prioType += humanTag(t)
 
 		if isRoot {
 			fmt.Printf("  %s%s %s\n", indicator, prioType, t.Name)
@@ -922,6 +1407,7 @@ func printTasksGroupedByFeature(tasks []*Task, taskMap map[string]*Task, showAll
 			if prioType != "" {
 				prioType = " " + prioType
 			}
+			prioType += humanTag(t)
 
 			// Indent if under a feature group
 			indent := ""
@@ -938,6 +1424,10 @@ func printTasksGroupedByFeature(tasks []*Task, taskMap map[string]*Task, showAll
 				if preview != "" {
 					fmt.Printf("%s  %s\n", indent, dim(preview))
 				}
+			}
+
+			if t.ReplacedBy != "" {
+				fmt.Printf("%s  %s replaced by %s\n", indent, dim("↳"), t.ReplacedBy)
 			}
 
 			// Pending dependencies
@@ -968,10 +1458,6 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
@@ -981,13 +1467,27 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load tasks: %w", err)
 	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
+
+	if taskHuman && taskNoHuman {
+		return newTaskError("invalid_input", "cannot use --human with --no-human")
+	}
 
 	// Filter by feature if specified
 	if taskFeature != "" {
 		tasks = filterTasksByFeature(tasks, taskFeature)
 	}
+	if taskHuman || taskNoHuman {
+		tasks = filterTasksByHuman(tasks, taskHuman)
+	}
 
 	if len(tasks) == 0 {
+		if taskJSON {
+			return printTaskListJSON(projectName, tasks, map[string]*Task{}, assignments)
+		}
 		if taskFeature != "" {
 			fmt.Printf("%s No tasks for project '%s' with feature '%s'\n", yellow("!"), projectName, taskFeature)
 		} else {
@@ -1065,8 +1565,28 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		tasks = filtered
 	}
 
-	// Sort by priority then status
+	// Sort by priority then status, or by age on request
 	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
+	switch strings.ToLower(taskSort) {
+	case "", "priority":
+	case "age":
+		sortTasksByAge(sorted)
+	default:
+		return newTaskError("invalid_input", "invalid --sort '%s'. Use: priority or age", taskSort)
+	}
+	visible := sorted
+	if !taskAll {
+		filtered := make([]*Task, 0, len(sorted))
+		for _, task := range sorted {
+			if computeTaskStatus(task, taskMap) != StatusCompleted {
+				filtered = append(filtered, task)
+			}
+		}
+		visible = filtered
+	}
+	if taskJSON {
+		return printTaskListJSON(projectName, visible, taskMap, assignments)
+	}
 
 	// Count by status
 	completedCount := 0
@@ -1127,6 +1647,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		if prioType != "" {
 			prioType = " " + prioType
 		}
+		prioType += humanTag(t)
 
 		fmt.Printf("%s%s %s\n", statusBadge, prioType, t.Name)
 
@@ -1142,6 +1663,10 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 			if preview != "" {
 				fmt.Printf("  %s\n", dim(preview))
 			}
+		}
+
+		if t.ReplacedBy != "" {
+			fmt.Printf("  %s replaced by %s\n", dim("↳"), t.ReplacedBy)
 		}
 
 		// Pending dependencies
@@ -1169,44 +1694,14 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
 	}
 
-	// Validate priority
-	if taskPriority < 0 || taskPriority > 4 {
-		return fmt.Errorf("invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskPriority)
-	}
-
-	// Validate type
-	if !validTaskTypes[taskType] {
-		return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskType)
-	}
-
-	// Build path: ~/.agmd/task/<project>/<name>.md
-	taskDir := filepath.Join(reg.BasePath, "task", projectName)
-	filePath := filepath.Join(taskDir, name+".md")
-
-	// Check if exists
-	if _, err := os.Stat(filePath); err == nil {
-		return fmt.Errorf("task:%s already exists in project '%s'", name, projectName)
-	}
-
-	// Create directory
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		return fmt.Errorf("failed to create task directory: %w", err)
-	}
-
 	// Determine content source
-	var content string
-	if taskContent != "" {
-		content = taskContent
-	} else if !isTerminal(os.Stdin) {
+	content := taskContent
+	if content == "" && !isTerminal(os.Stdin) {
 		stdinContent, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("failed to read from stdin: %w", err)
@@ -1214,61 +1709,46 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		content = string(stdinContent)
 	}
 
-	// Parse blocked-by dependencies
-	var dependsOn []string
-	if taskBlockedBy != "" {
-		deps := strings.Split(taskBlockedBy, ",")
-		for _, dep := range deps {
-			dep = strings.TrimSpace(dep)
-			if dep != "" {
-				dependsOn = append(dependsOn, dep)
-			}
-		}
-
-		// Validate that all dependencies exist
-		for _, dep := range dependsOn {
-			depPath := getTaskPath(reg, projectName, dep)
-			if _, err := os.Stat(depPath); os.IsNotExist(err) {
-				return fmt.Errorf("dependency task '%s' not found in project '%s'", dep, projectName)
-			}
-		}
+	task, err := createTask(reg, projectName, newTaskSpec{
+		Name:      name,
+		Content:   content,
+		Priority:  taskPriority,
+		Type:      taskType,
+		Feature:   taskFeature,
+		Human:     taskHuman,
+		Check:     taskCheck,
+		DependsOn: strings.Split(taskBlockedBy+","+taskDependsOn, ","),
+	})
+	if err != nil {
+		return err
 	}
-
-	// Build task frontmatter
-	subject := strings.Title(strings.ReplaceAll(name, "-", " "))
-
-	// Format depends_on as YAML array
-	dependsOnYAML := "[]"
-	if len(dependsOn) > 0 {
-		dependsOnYAML = "[" + strings.Join(dependsOn, ", ") + "]"
-	}
-
-	// Build optional lines
-	var optionalLines string
-	if taskFeature != "" {
-		optionalLines += fmt.Sprintf("feature: %s\n", taskFeature)
-	}
-	// Always write priority so it round-trips correctly (0 = P0 critical, 2 = P2 default)
-	optionalLines += fmt.Sprintf("priority: %d\n", taskPriority)
-	// Only include type if non-default (not "task")
-	if taskType != "task" {
-		optionalLines += fmt.Sprintf("type: %s\n", taskType)
-	}
-
-	fileContent := fmt.Sprintf("---\nsubject: %s\nstatus: pending\n%sdepends_on: %s\n---\n\n%s",
-		subject, optionalLines, dependsOnYAML, strings.TrimSpace(content))
-
-	if err := os.WriteFile(filePath, []byte(fileContent+"\n"), 0644); err != nil {
-		return fmt.Errorf("failed to create task: %w", err)
-	}
+	filePath := task.FilePath
+	taskID := task.ID
 
 	// Build info message
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "new",
+			Project: projectName,
+			Task:    name,
+			ID:      taskID,
+			Status:  "pending",
+		})
+	}
+
 	infoMsg := fmt.Sprintf("%s Created task:%s (project: %s", green("ok"), name, projectName)
 	if taskPriority != 2 {
 		infoMsg += fmt.Sprintf(", P%d", taskPriority)
 	}
 	if taskType != "task" {
 		infoMsg += fmt.Sprintf(", %s", taskType)
+	}
+	if taskHuman {
+		infoMsg += ", for: human"
+	}
+	if strings.TrimSpace(taskCheck) != "" {
+		infoMsg += ", checked automatically"
 	}
 	infoMsg += ")"
 	fmt.Println(infoMsg)
@@ -1291,59 +1771,58 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	// Handle "agmd task show --all"
 	if taskAll {
 		return runTaskShowAll(reg)
 	}
 
 	if len(args) == 0 {
-		return fmt.Errorf("specify a task name or use --all")
+		return newTaskError("invalid_input", "specify a task name or use --all")
 	}
 
 	name := args[0]
-
-	// Check if name includes project (project/task-name)
-	projectName := taskProject
-	taskName := name
-	if strings.Contains(name, "/") {
-		parts := strings.SplitN(name, "/", 2)
-		projectName = parts[0]
-		taskName = parts[1]
+	projectName, taskRef, err := resolveTaskProjectAndRef(name)
+	if err != nil {
+		return err
 	}
-
-	if projectName == "" {
-		pn, err := getProjectName()
-		if err != nil {
-			return err
-		}
-		projectName = pn
-	}
-
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
 	}
 
 	if taskRaw {
-		raw, err := os.ReadFile(taskPath)
-		if err != nil {
-			return fmt.Errorf("failed to read task: %w", err)
+		raw, readErr := os.ReadFile(task.FilePath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read task: %w", readErr)
 		}
 		fmt.Print(string(raw))
 		return nil
 	}
-
-	task, err := loadTask(taskPath)
+	// Dependencies are judged against their own status, so load the siblings.
+	tasks, err := loadProjectTasks(reg, projectName)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return fmt.Errorf("failed to load tasks: %w", err)
+	}
+	taskMap := buildTaskMap(tasks)
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
+
+	item := taskToJSONItem(task, taskMap, assignments, true)
+	if err := attachComments(reg, &item); err != nil {
+		return fmt.Errorf("failed to load comments: %w", err)
+	}
+	if taskJSON {
+		return printJSON(item)
 	}
 
 	fmt.Printf("%s %s\n", dim("subject:"), task.Subject)
-	fmt.Printf("%s %s\n", dim("status:"), task.Status)
+	if until, held := completionHeldUntil(task, taskNow()); held {
+		fmt.Printf("%s %s (%s)\n", dim("status:"), task.Status, formatHoldNote(until))
+	} else {
+		fmt.Printf("%s %s\n", dim("status:"), task.Status)
+	}
 	// Always show priority for non-default (P2 is default)
 	if task.Priority != 2 {
 		fmt.Printf("%s P%d\n", dim("priority:"), task.Priority)
@@ -1354,12 +1833,40 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	if task.Feature != "" {
 		fmt.Printf("%s %s\n", dim("feature:"), task.Feature)
 	}
+	if task.Human {
+		fmt.Printf("%s human\n", dim("for:"))
+	}
+	if task.Check != "" {
+		fmt.Printf("%s %s\n", dim("check:"), task.Check)
+	}
+	if task.ReplacedBy != "" {
+		fmt.Printf("%s %s\n", dim("replaced by:"), task.ReplacedBy)
+	}
+	if len(task.Replaces) > 0 {
+		fmt.Printf("%s %s\n", dim("replaces:"), strings.Join(task.Replaces, ", "))
+	}
 	if len(task.DependsOn) > 0 {
 		fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(task.DependsOn, ", "))
+	}
+	if assignment, exists := assignments[task.ID]; exists {
+		fmt.Printf("%s %s\n", dim("workflow_id:"), assignment.WorkflowID)
+		if assignment.WorktreePath != "" {
+			fmt.Printf("%s %s\n", dim("worktree_path:"), assignment.WorktreePath)
+		}
+	}
+	for _, ts := range []struct{ label, value string }{
+		{"created_at:", task.CreatedAt},
+		{"updated_at:", task.UpdatedAt},
+		{"completed_at:", task.CompletedAt},
+	} {
+		if ts.value != "" {
+			fmt.Printf("%s %s\n", dim(ts.label), ts.value)
+		}
 	}
 	if task.Content != "" {
 		fmt.Printf("\n%s\n", task.Content)
 	}
+	printTaskComments(item.Comments)
 
 	return nil
 }
@@ -1377,6 +1884,10 @@ func runTaskShowAll(reg *registry.Registry) error {
 	if err != nil {
 		return fmt.Errorf("failed to load tasks: %w", err)
 	}
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
+	}
 
 	// Filter by feature if specified
 	if taskFeature != "" {
@@ -1384,10 +1895,14 @@ func runTaskShowAll(reg *registry.Registry) error {
 	}
 
 	if len(tasks) == 0 {
-		if taskFeature != "" {
-			return fmt.Errorf("no tasks found for project '%s' with feature '%s'", projectName, taskFeature)
+		if taskJSON {
+			emptyTaskMap := map[string]*Task{}
+			return printJSON(buildTaskListJSON(projectName, taskFeature, tasks, emptyTaskMap, assignments, true))
 		}
-		return fmt.Errorf("no tasks found for project '%s'", projectName)
+		if taskFeature != "" {
+			return newTaskError("not_found", "no tasks found for project '%s' with feature '%s'", projectName, taskFeature)
+		}
+		return newTaskError("not_found", "no tasks found for project '%s'", projectName)
 	}
 
 	// Build task map and sort
@@ -1396,6 +1911,9 @@ func runTaskShowAll(reg *registry.Registry) error {
 		taskMap[t.Name] = t
 	}
 	sorted := sortTasksByPriorityAndStatus(tasks, taskMap)
+	if taskJSON {
+		return printJSON(buildTaskListJSON(projectName, taskFeature, sorted, taskMap, assignments, true))
+	}
 
 	fmt.Printf("Tasks for: %s\n\n", cyan(projectName))
 
@@ -1414,8 +1932,17 @@ func runTaskShowAll(reg *registry.Registry) error {
 		if t.Feature != "" {
 			fmt.Printf("%s %s\n", dim("feature:"), t.Feature)
 		}
+		if t.Human {
+			fmt.Printf("%s human\n", dim("for:"))
+		}
 		if len(t.DependsOn) > 0 {
 			fmt.Printf("%s %s\n", dim("depends_on:"), strings.Join(t.DependsOn, ", "))
+		}
+		if assignment, exists := assignments[t.ID]; exists {
+			fmt.Printf("%s %s\n", dim("workflow_id:"), assignment.WorkflowID)
+			if assignment.WorktreePath != "" {
+				fmt.Printf("%s %s\n", dim("worktree_path:"), assignment.WorktreePath)
+			}
 		}
 		if t.Content != "" {
 			fmt.Printf("\n%s\n", t.Content)
@@ -1437,10 +1964,6 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
 	projectName, err := getProjectName()
 	if err != nil {
 		return err
@@ -1460,18 +1983,30 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(completedTasks) == 0 {
+		if taskJSON {
+			return printJSON(taskMutationJSONPayload{
+				OK:      true,
+				Action:  "clean",
+				Project: projectName,
+			})
+		}
 		fmt.Printf("%s No completed tasks to clean in project '%s'\n", yellow("!"), projectName)
 		return nil
 	}
 
 	// Show what will be deleted
-	fmt.Printf("Found %d completed task(s) to delete:\n", len(completedTasks))
-	for _, t := range completedTasks {
-		fmt.Printf("  - %s\n", t.Name)
+	if !taskJSON {
+		fmt.Printf("Found %d completed task(s) to delete:\n", len(completedTasks))
+		for _, t := range completedTasks {
+			fmt.Printf("  - %s\n", t.Name)
+		}
 	}
 
 	// Confirmation prompt (unless --force)
 	if !taskForce {
+		if taskJSON {
+			return newTaskError("invalid_input", "task clean requires --force when --json is enabled")
+		}
 		fmt.Printf("\n%s This will permanently delete these tasks.\n", yellow("⚠"))
 		fmt.Print("\nAre you sure? (y/N): ")
 
@@ -1485,97 +2020,42 @@ func runTaskClean(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete the tasks
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// Another agent may have reopened a task since we listed it.
 	deleted := 0
 	for _, t := range completedTasks {
-		if err := os.Remove(t.FilePath); err != nil {
+		current, loadErr := loadTask(t.FilePath)
+		if loadErr != nil || current.Status != "completed" {
+			continue
+		}
+		if err := deleteTask(reg, projectName, current); err != nil {
 			fmt.Printf("  Failed to delete %s: %v\n", t.Name, err)
 		} else {
 			deleted++
 		}
 	}
 
+	if taskJSON {
+		return printJSON(struct {
+			OK      bool   `json:"ok"`
+			Action  string `json:"action"`
+			Project string `json:"project"`
+			Deleted int    `json:"deleted"`
+		}{
+			OK:      true,
+			Action:  "clean",
+			Project: projectName,
+			Deleted: deleted,
+		})
+	}
+
 	fmt.Printf("%s Deleted %d completed task(s)\n", green("✓"), deleted)
 
-	// Clean up empty project directory
-	taskDir := getTaskDir(reg, projectName)
-	entries, err := os.ReadDir(taskDir)
-	if err == nil && len(entries) == 0 {
-		os.Remove(taskDir)
-	}
-
-	return nil
-}
-
-func runTaskEdit(cmd *cobra.Command, args []string) error {
-	green := color.New(color.FgGreen).SprintFunc()
-
-	taskName := args[0]
-
-	// Check if at least one flag is provided
-	if taskEditPriority == -1 && taskEditType == "" {
-		return fmt.Errorf("specify at least one of --priority or --type")
-	}
-
-	// Validate priority if provided
-	if taskEditPriority != -1 && (taskEditPriority < 0 || taskEditPriority > 4) {
-		return fmt.Errorf("invalid priority %d. Use 0-4 (0=critical, 4=backlog)", taskEditPriority)
-	}
-
-	// Validate type if provided
-	if taskEditType != "" && !validTaskTypes[taskEditType] {
-		return fmt.Errorf("invalid type '%s'. Use: bug, feature, task, or chore", taskEditType)
-	}
-
-	reg, err := registry.New()
-	if err != nil {
-		return fmt.Errorf("failed to load registry: %w", err)
-	}
-
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
-	projectName, err := getProjectName()
-	if err != nil {
-		return err
-	}
-
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	task, err := loadTask(taskPath)
-	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
-	}
-
-	// Track changes for output message
-	var changes []string
-
-	// Update priority if specified
-	if taskEditPriority != -1 {
-		oldPriority := task.Priority
-		task.Priority = taskEditPriority
-		changes = append(changes, fmt.Sprintf("priority P%d → P%d", oldPriority, taskEditPriority))
-	}
-
-	// Update type if specified
-	if taskEditType != "" {
-		oldType := task.Type
-		if oldType == "" {
-			oldType = "task"
-		}
-		task.Type = taskEditType
-		changes = append(changes, fmt.Sprintf("type %s → %s", oldType, taskEditType))
-	}
-
-	if err := saveTask(task); err != nil {
-		return fmt.Errorf("failed to save task: %w", err)
-	}
-
-	fmt.Printf("%s Updated task '%s': %s\n", green("✓"), taskName, strings.Join(changes, ", "))
 	return nil
 }
 
@@ -1584,33 +2064,37 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 	blue := color.New(color.FgBlue).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
 
-	name := args[0]
+	taskArg := args[0]
 
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	if !reg.Exists() {
-		return fmt.Errorf("registry not found\nRun 'agmd setup' first")
-	}
-
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
 
-	taskPath := getTaskPath(reg, projectName, name)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", name, projectName)
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
 	}
+	name := task.Name
+	taskPath := task.FilePath
+	taskID := task.ID
 
 	// Show what will be deleted
-	fmt.Printf("%s Deleting task:%s (project: %s)\n", blue("→"), name, projectName)
-	fmt.Printf("  Path: %s\n", taskPath)
+	if !taskJSON {
+		fmt.Printf("%s Deleting task:%s (project: %s)\n", blue("→"), name, projectName)
+		fmt.Printf("  Path: %s\n", taskPath)
+	}
 
 	// Confirmation prompt (unless --force)
 	if !taskForce {
+		if taskJSON {
+			return newTaskError("invalid_input", "task delete requires --force when --json is enabled")
+		}
 		fmt.Printf("\n%s This will permanently delete this task.\n", yellow("⚠"))
 		fmt.Print("\nAre you sure? (y/N): ")
 
@@ -1624,37 +2108,71 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete the file
-	if err := os.Remove(taskPath); err != nil {
-		return fmt.Errorf("failed to delete task: %w", err)
+	unlock, err := lockProject(reg, projectName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	if err := deleteTask(reg, projectName, task); err != nil {
+		return err
+	}
+
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "delete",
+			Project: projectName,
+			Task:    name,
+			ID:      taskID,
+		})
 	}
 
 	fmt.Printf("%s Deleted task:%s\n", green("✓"), name)
+	return nil
+}
 
-	// Clean up empty project directory
-	taskDir := getTaskDir(reg, projectName)
-	entries, err := os.ReadDir(taskDir)
-	if err == nil && len(entries) == 0 {
-		os.Remove(taskDir)
+// setTaskStatus validates newStatus and applies it to task, enforcing the
+// completed -> non-completed transition guard. It mutates task.Status but does
+// not persist the task; callers are responsible for saving. Shared by the CLI
+// status command and the web PATCH handler so validation stays identical.
+func setTaskStatus(task *Task, newStatus string) error {
+	newStatus = strings.ToLower(newStatus)
+
+	if !validTaskStatuses[newStatus] {
+		return newTaskError("invalid_input", "invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
 	}
 
+	if task.Status == "completed" && newStatus != "completed" {
+		return newTaskError(
+			"invalid_transition",
+			"invalid status transition for task '%s': completed -> %s",
+			task.Name,
+			newStatus,
+		)
+	}
+
+	if newStatus == "completed" && task.Status != "completed" {
+		task.CompletedAt = taskTimestamp(taskNow())
+		task.CompletionCountsAt = ""
+	}
+	task.Status = newStatus
 	return nil
 }
 
 func runTaskStatus(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	taskName := args[0]
+	taskArg := args[0]
 	newStatus := strings.ToLower(args[1])
 
-	// Validate status
-	validStatuses := map[string]bool{
-		"pending":     true,
-		"in_progress": true,
-		"completed":   true,
+	// Validate status before touching the registry to preserve CLI behavior.
+	if !validTaskStatuses[newStatus] {
+		return newTaskError("invalid_input", "invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
 	}
-	if !validStatuses[newStatus] {
-		return fmt.Errorf("invalid status '%s'. Use: pending, in_progress, or completed", newStatus)
+	hold, err := parseCompletionHold(taskHold, newStatus)
+	if err != nil {
+		return err
 	}
 
 	reg, err := registry.New()
@@ -1662,124 +2180,227 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
 
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(taskArg)
 	if err != nil {
 		return err
 	}
 
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	task, err := loadTask(taskPath)
+	unlock, err := lockProject(reg, projectName)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return err
 	}
+	defer unlock()
 
-	task.Status = newStatus
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
+	}
+	taskName := task.Name
+
+	if hold > 0 && task.Status == "completed" {
+		// Dependents may already have been claimed: a hold now would not undo that.
+		return newTaskError("invalid_transition", "task '%s' is already completed; --hold only applies when completing", taskName)
+	}
+	if err := setTaskStatus(task, newStatus); err != nil {
+		return err
+	}
+	if hold > 0 {
+		applyCompletionHold(task, hold, taskNow())
+	}
 	if err := saveTask(task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
 	}
+	holdUntil, held := completionHeldUntil(task, taskNow())
 
+	if taskJSON {
+		payload := taskMutationJSONPayload{
+			OK:      true,
+			Action:  "status",
+			Project: projectName,
+			Task:    taskName,
+			ID:      task.ID,
+			Status:  newStatus,
+		}
+		if held {
+			payload.HoldUntil = holdUntil.Format(time.RFC3339)
+		}
+		return printJSON(payload)
+	}
+
+	if held {
+		fmt.Printf("%s Updated task '%s' status to '%s' (%s)\n", green("✓"), taskName, newStatus, formatHoldNote(holdUntil))
+		return nil
+	}
 	fmt.Printf("%s Updated task '%s' status to '%s'\n", green("✓"), taskName, newStatus)
 	return nil
 }
 
-func runTaskBlockedBy(cmd *cobra.Command, args []string) error {
+func runTaskAssign(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
 
-	taskName := args[0]
-	dependency := args[1]
+	if strings.TrimSpace(taskWorkflowID) == "" {
+		return newTaskError("invalid_input", "--workflow-id is required")
+	}
 
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
-
-	projectName, err := getProjectName()
+	projectName, taskRef, err := resolveTaskProjectAndRef(args[0])
 	if err != nil {
 		return err
 	}
 
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	// Check dependency exists
-	depPath := getTaskPath(reg, projectName, dependency)
-	if _, err := os.Stat(depPath); os.IsNotExist(err) {
-		return fmt.Errorf("dependency task '%s' not found in project '%s'", dependency, projectName)
-	}
-
-	task, err := loadTask(taskPath)
+	unlock, err := lockProject(reg, projectName)
 	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
+		return err
+	}
+	defer unlock()
+
+	task, err := resolveTaskRef(reg, projectName, taskRef)
+	if err != nil {
+		return err
 	}
 
-	// Check if already depends on it
-	for _, dep := range task.DependsOn {
-		if dep == dependency {
-			return fmt.Errorf("task '%s' already depends on '%s'", taskName, dependency)
-		}
+	if task.Human {
+		return newTaskError("conflict", "task '%s' is for the human: agents can't be assigned to it", task.Name)
 	}
 
-	task.DependsOn = append(task.DependsOn, dependency)
-	if err := saveTask(task); err != nil {
-		return fmt.Errorf("failed to save task: %w", err)
+	assignments, err := loadTaskAssignments(reg, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to load assignments: %w", err)
 	}
 
-	fmt.Printf("%s Added dependency: '%s' is now blocked by '%s'\n", green("✓"), taskName, dependency)
+	workflowID := strings.TrimSpace(taskWorkflowID)
+	if existing, ok := assignments[task.ID]; ok && existing.WorkflowID != workflowID && !taskForce {
+		return newTaskError("conflict", "task '%s' is already assigned to workflow '%s' (use --force to take it over)", task.Name, existing.WorkflowID)
+	}
+
+	assignment := taskAssignment{
+		TaskID:       task.ID,
+		TaskName:     task.Name,
+		WorkflowID:   workflowID,
+		WorktreePath: strings.TrimSpace(taskWorktreePath),
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	assignments[task.ID] = assignment
+
+	if err := saveTaskAssignments(reg, projectName, assignments); err != nil {
+		return fmt.Errorf("failed to save assignments: %w", err)
+	}
+
+	if taskJSON {
+		return printJSON(struct {
+			OK         bool           `json:"ok"`
+			Action     string         `json:"action"`
+			Project    string         `json:"project"`
+			Task       string         `json:"task"`
+			ID         string         `json:"id"`
+			Assignment taskAssignment `json:"assignment"`
+		}{
+			OK:         true,
+			Action:     "assign",
+			Project:    projectName,
+			Task:       task.Name,
+			ID:         task.ID,
+			Assignment: assignment,
+		})
+	}
+
+	fmt.Printf("%s Assigned task '%s' to workflow '%s'\n", green("✓"), task.Name, assignment.WorkflowID)
 	return nil
 }
 
-func runTaskUnblock(cmd *cobra.Command, args []string) error {
+func runTaskUnassign(cmd *cobra.Command, args []string) error {
 	green := color.New(color.FgGreen).SprintFunc()
-
-	taskName := args[0]
-	dependency := args[1]
 
 	reg, err := registry.New()
 	if err != nil {
 		return fmt.Errorf("failed to load registry: %w", err)
 	}
-
-	projectName, err := getProjectName()
-	if err != nil {
-		return err
-	}
-
-	taskPath := getTaskPath(reg, projectName, taskName)
-	if _, err := os.Stat(taskPath); os.IsNotExist(err) {
-		return fmt.Errorf("task '%s' not found in project '%s'", taskName, projectName)
-	}
-
-	task, err := loadTask(taskPath)
-	if err != nil {
-		return fmt.Errorf("failed to load task: %w", err)
-	}
-
-	// Remove dependency
-	found := false
-	newDeps := []string{}
-	for _, dep := range task.DependsOn {
-		if dep == dependency {
-			found = true
-		} else {
-			newDeps = append(newDeps, dep)
+	if taskUnassignAll {
+		projectName, projectErr := getProjectName()
+		if projectErr != nil {
+			return projectErr
 		}
+		unlock, lockErr := lockProject(reg, projectName)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer unlock()
+		assignments, loadErr := loadTaskAssignments(reg, projectName)
+		if loadErr != nil {
+			return fmt.Errorf("failed to load assignments: %w", loadErr)
+		}
+		removed := 0
+		workflowID := strings.TrimSpace(taskWorkflowID)
+		var released []string
+		for key, assignment := range assignments {
+			if assignment.WorkflowID == workflowID {
+				delete(assignments, key)
+				released = append(released, assignment.TaskName)
+				removed++
+			}
+		}
+		if removed == 0 {
+			return newTaskError("not_found", "no assignments found for workflow '%s' in project '%s'", workflowID, projectName)
+		}
+		if saveErr := saveTaskAssignments(reg, projectName, assignments); saveErr != nil {
+			return fmt.Errorf("failed to save assignments: %w", saveErr)
+		}
+		for _, name := range released {
+			if task, loadErr := loadTask(getTaskPath(reg, projectName, name)); loadErr == nil {
+				if releaseErr := releaseTask(task); releaseErr != nil {
+					return releaseErr
+				}
+			}
+		}
+		if taskJSON {
+			return printJSON(struct {
+				OK         bool   `json:"ok"`
+				Action     string `json:"action"`
+				Project    string `json:"project"`
+				WorkflowID string `json:"workflow_id"`
+				Removed    int    `json:"removed"`
+			}{
+				OK:         true,
+				Action:     "unassign",
+				Project:    projectName,
+				WorkflowID: workflowID,
+				Removed:    removed,
+			})
+		}
+		fmt.Printf("%s Unassigned %d task(s) from workflow '%s'\n", green("✓"), removed, workflowID)
+		return nil
 	}
 
-	if !found {
-		return fmt.Errorf("task '%s' does not depend on '%s'", taskName, dependency)
+	projectName, taskRef, projectErr := resolveTaskProjectAndRef(args[0])
+	if projectErr != nil {
+		return projectErr
+	}
+	unlock, lockErr := lockProject(reg, projectName)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
+	task, taskErr := resolveTaskRef(reg, projectName, taskRef)
+	if taskErr != nil {
+		return taskErr
 	}
 
-	task.DependsOn = newDeps
-	if err := saveTask(task); err != nil {
-		return fmt.Errorf("failed to save task: %w", err)
+	if releaseErr := releaseClaim(reg, projectName, task); releaseErr != nil {
+		return releaseErr
 	}
 
-	fmt.Printf("%s Removed dependency: '%s' is no longer blocked by '%s'\n", green("✓"), taskName, dependency)
+	if taskJSON {
+		return printJSON(taskMutationJSONPayload{
+			OK:      true,
+			Action:  "unassign",
+			Project: projectName,
+			Task:    task.Name,
+			ID:      task.ID,
+		})
+	}
+	fmt.Printf("%s Unassigned task '%s'\n", green("✓"), task.Name)
 	return nil
 }
