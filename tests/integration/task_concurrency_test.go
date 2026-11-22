@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // These tests run a real agmd binary as parallel subprocesses: in-process
@@ -361,5 +362,158 @@ func TestTaskConcurrency_ParallelDepRemovesAreNotLost(t *testing.T) {
 	}
 	if left := showFullTask(t, "hub").DependsOn; len(left) != 0 {
 		t.Errorf("dependencies left after parallel removes: %v", left)
+	}
+}
+
+// Parallel replaces of different tasks by one replacement: every old task is
+// closed, every dependent moved, and the replacement records all of them.
+func TestTaskConcurrency_ParallelReplacesAreNotLost(t *testing.T) {
+	setup(t)
+	const n = 8
+	run(t, "task", "new", "new", "--project", "p", "--content", "replacement")
+	for i := 0; i < n; i++ {
+		run(t, "task", "new", fmt.Sprintf("old%d", i), "--project", "p", "--content", "old")
+		run(t, "task", "new", fmt.Sprintf("dep%d", i), "--project", "p", "--content", "dependent", "--blocked-by", fmt.Sprintf("old%d", i))
+	}
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"task", "replace", fmt.Sprintf("old%d", i), "--by", "new", "--project", "p"}
+	})
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("process %d failed: %v", i, r.err)
+		}
+	}
+	replaces := showP(t, "new").Replaces
+	if len(replaces) != n {
+		t.Errorf("new replaces %d tasks, want %d (lost updates): %v", len(replaces), n, replaces)
+	}
+	if got := showFullTask(t, "new").Comments; len(got) != n {
+		t.Errorf("new has %d comments, want %d", len(got), n)
+	}
+	for i := 0; i < n; i++ {
+		if old := showP(t, fmt.Sprintf("old%d", i)); old.Status != "completed" || old.ReplacedBy != "new" {
+			t.Errorf("old%d = %+v", i, old)
+		}
+		if deps := showFullTask(t, fmt.Sprintf("dep%d", i)).DependsOn; len(deps) != 1 || deps[0] != "new" {
+			t.Errorf("dep%d depends on %v, want [new]", i, deps)
+		}
+	}
+}
+
+// Parallel check runs: each passing human task is completed exactly once,
+// with one completion comment.
+func TestTaskConcurrency_ParallelChecksCompleteOnce(t *testing.T) {
+	setup(t)
+	chdir(t)
+	const n = 6
+	for i := 0; i < 3; i++ {
+		run(t, "task", "new", fmt.Sprintf("h%d", i), "--project", "p", "--human", "--check", "true", "--content", "step")
+	}
+	run(t, "task", "new", "never", "--project", "p", "--human", "--check", "false", "--content", "not yet")
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"task", "check", "--project", "p", "--author", fmt.Sprintf("checker-%d", i), "--json"}
+	})
+	completions := map[string]int{}
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("process %d failed: %v", i, r.err)
+		}
+		var payload struct {
+			Completed []struct {
+				Task string `json:"task"`
+			} `json:"completed"`
+		}
+		if err := json.Unmarshal(r.stdout, &payload); err != nil {
+			t.Fatalf("process %d output is not JSON: %v\n%s", i, err, r.stdout)
+		}
+		for _, c := range payload.Completed {
+			completions[c.Task]++
+		}
+	}
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("h%d", i)
+		if completions[name] != 1 {
+			t.Errorf("%s reported completed %d times, want 1", name, completions[name])
+		}
+		task := showFullTask(t, name)
+		if task.Status != "completed" || len(task.Comments) != 1 {
+			t.Errorf("%s = status %s, %d comments; want completed with one comment", name, task.Status, len(task.Comments))
+		}
+	}
+	if completions["never"] != 0 || showFullTask(t, "never").Status == "completed" {
+		t.Error("a failing check completed its task")
+	}
+}
+
+// Moves in opposite directions at once take both project locks in the same
+// order: no deadlock, and every task ends up in exactly one project with its
+// comments.
+func TestTaskConcurrency_OppositeMovesDoNotDeadlockOrLose(t *testing.T) {
+	registry := setup(t)
+	const n = 6
+	for i := 0; i < n; i++ {
+		run(t, "task", "new", fmt.Sprintf("a%d", i), "--project", "pa", "--content", "A")
+		run(t, "task", "comment", fmt.Sprintf("a%d", i), "keep", "--project", "pa")
+		run(t, "task", "new", fmt.Sprintf("b%d", i), "--project", "pb", "--content", "B")
+	}
+	done := make(chan []procResult, 1)
+	go func() {
+		done <- runParallel(t, 2*n, func(i int) []string {
+			if i%2 == 0 {
+				return []string{"task", "move", fmt.Sprintf("a%d", i/2), "--project", "pa", "--to-project", "pb"}
+			}
+			return []string{"task", "move", fmt.Sprintf("b%d", i/2), "--project", "pb", "--to-project", "pa"}
+		})
+	}()
+	var results []procResult
+	select {
+	case results = <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("parallel moves did not finish: deadlock?")
+	}
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("process %d failed: %v", i, r.err)
+		}
+	}
+	for i := 0; i < n; i++ {
+		for _, c := range []struct{ name, from, to string }{
+			{fmt.Sprintf("a%d", i), "pa", "pb"},
+			{fmt.Sprintf("b%d", i), "pb", "pa"},
+		} {
+			if fileExists(filepath.Join(registry, "task", c.from, c.name+".md")) {
+				t.Errorf("%s still in %s", c.name, c.from)
+			}
+			moved := showIn(t, c.to, c.name)
+			if c.from == "pa" && (len(moved.Comments) != 2 || moved.Comments[0].Body != "keep") {
+				t.Errorf("%s comments = %+v", c.name, moved.Comments)
+			}
+		}
+	}
+}
+
+// Parallel deletes of one author's comments by index from the end: each
+// removes exactly one, and the other author's comment survives.
+func TestTaskConcurrency_ParallelCommentDeletesAreNotLost(t *testing.T) {
+	setup(t)
+	const n = 6
+	run(t, "task", "new", "c", "--project", "p", "--content", "C")
+	run(t, "task", "comment", "c", "other", "--project", "p", "--author", "x")
+	for i := 0; i < n; i++ {
+		run(t, "task", "comment", "c", fmt.Sprintf("mine-%d", i), "--project", "p", "--author", "me")
+	}
+	// Every process deletes comment #2: under the lock each sees the list
+	// left by the previous one, so n deletes remove all of "me"'s comments.
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"task", "comment", "c", "--delete", "2", "--project", "p", "--author", "me"}
+	})
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("process %d failed: %v", i, r.err)
+		}
+	}
+	got := showFullTask(t, "c").Comments
+	if len(got) != 1 || got[0].Body != "other" {
+		t.Errorf("comments left = %+v, want only the other author's", got)
 	}
 }

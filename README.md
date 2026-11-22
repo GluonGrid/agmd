@@ -62,8 +62,10 @@ agmd task update setup-db --feature auth  # Change the feature (--feature "" cle
 agmd task update merge-pr --human         # Mark for the human (--human=false hands it back)
 agmd task update merge-pr --check "<cmd>" # Set a human task's check (--check "" clears it)
 agmd task replace old-task --by new-task  # Close as replaced, move its dependents
+agmd task move setup-db --to-project infra  # Move to another project (keeps id, comments)
+agmd task comment setup-db --delete 2     # Delete comment #2 (yours; others need --force)
 agmd task check                           # Complete open human tasks whose check passes
-agmd task lint                            # Find unflagged human- tasks and replaced-but-open ones
+agmd task lint                            # Find unflagged human- tasks and replaced-but-open ones (--all: completed too)
 agmd task dep add create-api setup-db     # Add dependency (refuses cycles)
 agmd task dep remove create-api setup-db  # Remove dependency
 
@@ -102,7 +104,9 @@ agmd task check --project myproj          # prints "myproj/merge-pr" once the PR
 
 **Replaced tasks.** When a task is renamed, split or superseded, close it instead of leaving a comment: `agmd task replace <old> --by <new>` completes the old task, records `replaced_by` on it and `replaces` on the new one, moves tasks that depended on the old task to the new one (so they wait for the replacement), releases a claim on the old task and comments on both. It fails with `invalid_transition` if the old task is already completed and with `conflict` if moving a dependent would create a cycle. `task list` and `task show` print `replaced by <new>`; JSON carries `replaced_by` and `replaces`. Never leave a replaced task open.
 
-**Lint.** `agmd task lint [--project p]` lists tasks named `human-…` that are not flagged human (they are hidden from `list --human`; fix with `task update <task> --human`) and open tasks with a comment saying they were replaced or superseded (fix with `task replace`). One line per finding, `<project>/<task> <kind>: <detail>`; `--json` for programs. The exit status is 0 either way.
+**Moving a task.** `agmd task move <task> --to-project <project>` moves a task that was filed in the wrong project. It keeps its name, id, text, fields (human flag, check, priority…), comments and `created_at`/`completed_at`; `updated_at` records the move and the task gets the comment `Moved from project '<from>'.` (`--author`, else `$AGMD_AUTHOR`, else `user`). The move holds the locks of both projects (taken in name order, so opposite moves cannot deadlock). It fails with `conflict` when the task has dependencies or dependents (they would cross projects; remove them with `task dep remove` first), when the target already has a task of that name or id, or while another workflow holds a claim on it; pass `--workflow-id` to move your own claim along. `--json` prints `{"ok":true,"action":"move","project":"<to>","from_project":"<from>",...}`. `task replace --by` still only accepts a task of the same project: move the replacement first if needed.
+
+**Lint.** `agmd task lint [--project p] [--all]` lists tasks named `human-…` that are not flagged human (they are hidden from `list --human`; fix with `task update <task> --human`) and open tasks with a comment stating they were `replaced by <task>` or `superseded by <task>` (fix with `task replace`). `<task>` must be a task of the project, a `<project>/<task>` reference or a hyphenated name, and a plan or negation (“should be replaced by…”, “not replaced by…”) does not count. Only open tasks are listed; `--all` also checks completed ones. One line per finding, `<project>/<task> <kind>: <detail>`; `--json` for programs. The exit status is 0 either way.
 
 ### Undoing a completion
 
@@ -135,6 +139,8 @@ agmd task comment setup-db "Schema migrated" --author agent-1   # Log progress
 agmd task status setup-db completed                   # Finish it
 agmd task unassign setup-db                           # Release the claim (back to pending if unfinished)
 ```
+
+`task show` numbers comments from `#1` (oldest). `agmd task comment <task> --delete <n> --author <you>` deletes comment `n`; a comment by another author is refused with `conflict` unless you pass `--force` (for example to remove a personal detail an agent posted).
 
 `next --claim` atomically picks the highest-priority agent task (never a [human task](#human-tasks)) that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
 

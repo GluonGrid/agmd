@@ -184,9 +184,10 @@ Commands:
   change        update <t> [--content|--content-file|--subject|-p|-t|--feature]
   dependencies  dep add <t> <dep>, dep remove <t> <dep>
   lifecycle     next --claim, heartbeat, comment, status, unassign,
-                reopen, replace, delete, clean
+                reopen, replace, move, delete, clean
   human tasks   new <t> --human [--check CMD], list --human, check
-  checks        check (human-task checks), lint (forgotten or mislabelled)
+  checks        check (human-task checks), lint [--all] (forgotten or
+                mislabelled; open tasks only unless --all)
   other         assign, emoji, web
 
 Change a task: one 'update' call sets any mix of text and fields under the
@@ -208,6 +209,8 @@ commands and completes those that exit 0.
 Undo: 'reopen <t>' undoes a completion while no dependent is claimed or
 done; 'status <t> completed --hold 2m' delays releasing dependents.
 'replace <old> --by <new>' closes <old> and moves its dependents to <new>.
+'move <t> --to-project P' keeps id and comments; refused with dependencies.
+'comment <t> --delete N' deletes comment #N (yours, or --force).
 
 JSON: --json on every command; errors are one JSON line on stderr.
 Exit codes: 0 ok, 1 other, 2 invalid_input, 3 not_found (also: nothing to
