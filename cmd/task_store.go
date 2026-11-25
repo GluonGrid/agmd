@@ -42,6 +42,8 @@ func encodeTask(task *Task) ([]byte, error) {
 		Human     bool     `yaml:"human,omitempty"`
 		Check     string   `yaml:"check,omitempty"`
 
+		Run map[string]string `yaml:"run,omitempty"`
+
 		ReplacedBy string   `yaml:"replaced_by,omitempty"`
 		Replaces   []string `yaml:"replaces,omitempty"`
 
@@ -59,6 +61,8 @@ func encodeTask(task *Task) ([]byte, error) {
 		DependsOn: task.DependsOn,
 		Human:     task.Human,
 		Check:     task.Check,
+
+		Run: task.Run,
 
 		ReplacedBy: task.ReplacedBy,
 		Replaces:   task.Replaces,
@@ -91,6 +95,9 @@ type newTaskSpec struct {
 	Human     bool     // a step only the human can do
 	Check     string   // shell command; exit 0 means the human step is done
 	DependsOn []string // task names or ids in the same project
+	// Run holds run fields (key without the "run." prefix, already
+	// validated by parseRunFieldFlags); empty values are dropped.
+	Run map[string]string
 }
 
 // createTask validates spec and writes a new pending task. It fails with
@@ -145,6 +152,7 @@ func createTask(reg *registry.Registry, projectName string, spec newTaskSpec) (*
 		FilePath:    filepath.Join(taskDir, spec.Name+".md"),
 		ProjectName: projectName,
 	}
+	applyRunFields(task, runFieldChanges{Set: spec.Run})
 	data, err := encodeTask(task)
 	if err != nil {
 		return nil, err

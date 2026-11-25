@@ -34,6 +34,9 @@ type Task struct {
 	// Check is a shell command for a human task: exit 0 means the step is
 	// done, and `task check` completes the task (see task_check.go).
 	Check string `yaml:"check,omitempty"`
+	// Run holds free string settings for starting a worker on the task
+	// (profile, model, effort, ...); see task_run_fields.go.
+	Run map[string]string `yaml:"run,omitempty"`
 	// ReplacedBy names the task that replaced this one; Replaces lists the
 	// tasks this one replaced (see task_replace.go).
 	ReplacedBy string   `yaml:"replaced_by,omitempty"`
@@ -434,6 +437,7 @@ func init() {
 	taskNewCmd.Flags().StringVarP(&taskType, "type", "t", "task", "Type (bug, feature, task, chore)")
 	taskNewCmd.Flags().BoolVar(&taskHuman, "human", false, "A step only the human can do; agents never claim it")
 	taskNewCmd.Flags().StringVar(&taskCheck, "check", "", "With --human: shell command whose exit 0 means the step is done (see 'task check')")
+	taskNewCmd.Flags().StringArrayVar(&taskSetFields, "set", nil, "Set a run field, run.<key>=<value> (repeatable)")
 	taskNewCmd.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 	taskNewCmd.RegisterFlagCompletionFunc("type", completeTypeFlag)
 
@@ -564,6 +568,7 @@ type taskJSONItem struct {
 	Feature             string              `json:"feature,omitempty"`
 	Human               bool                `json:"human,omitempty"`
 	Check               string              `json:"check,omitempty"`
+	Run                 map[string]string   `json:"run,omitempty"`
 	ReplacedBy          string              `json:"replaced_by,omitempty"`
 	Replaces            []string            `json:"replaces,omitempty"`
 	DependsOn           []string            `json:"depends_on"`
@@ -620,6 +625,7 @@ func taskToJSONItem(task *Task, taskMap map[string]*Task, assignments map[string
 		Feature:        task.Feature,
 		Human:          task.Human,
 		Check:          task.Check,
+		Run:            task.Run,
 		ReplacedBy:     task.ReplacedBy,
 		Replaces:       task.Replaces,
 		DependsOn:      task.DependsOn,
@@ -1699,6 +1705,11 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	runFields, err := parseRunFieldFlags(taskSetFields, nil)
+	if err != nil {
+		return err
+	}
+
 	// Determine content source
 	content := taskContent
 	if content == "" && !isTerminal(os.Stdin) {
@@ -1717,6 +1728,7 @@ func runTaskNew(cmd *cobra.Command, args []string) error {
 		Feature:   taskFeature,
 		Human:     taskHuman,
 		Check:     taskCheck,
+		Run:       runFields.Set,
 		DependsOn: strings.Split(taskBlockedBy+","+taskDependsOn, ","),
 	})
 	if err != nil {
@@ -1838,6 +1850,9 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 	}
 	if task.Check != "" {
 		fmt.Printf("%s %s\n", dim("check:"), task.Check)
+	}
+	if len(task.Run) > 0 {
+		fmt.Printf("%s %s\n", dim("run:"), formatRunFields(task.Run))
 	}
 	if task.ReplacedBy != "" {
 		fmt.Printf("%s %s\n", dim("replaced by:"), task.ReplacedBy)
