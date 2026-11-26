@@ -61,6 +61,7 @@ agmd task update setup-db --priority 0 --type bug  # Change priority/type
 agmd task update setup-db --feature auth  # Change the feature (--feature "" clears it)
 agmd task update merge-pr --human         # Mark for the human (--human=false hands it back)
 agmd task update merge-pr --check "<cmd>" # Set a human task's check (--check "" clears it)
+agmd task update ui --set run.profile=frontend --unset run.model  # Set/clear run fields
 agmd task replace old-task --by new-task  # Close as replaced, move its dependents
 agmd task move setup-db --to-project infra  # Move to another project (keeps id, comments)
 agmd task comment setup-db --delete 2     # Delete comment #2 (yours; others need --force)
@@ -103,6 +104,13 @@ agmd task check --project myproj          # prints "myproj/merge-pr" once the PR
 ```
 
 **Replaced tasks.** When a task is renamed, split or superseded, close it instead of leaving a comment: `agmd task replace <old> --by <new>` completes the old task, records `replaced_by` on it and `replaces` on the new one, moves tasks that depended on the old task to the new one (so they wait for the replacement), releases a claim on the old task and comments on both. It fails with `invalid_transition` if the old task is already completed and with `conflict` if moving a dependent would create a cycle. `task list` and `task show` print `replaced by <new>`; JSON carries `replaced_by` and `replaces`. Never leave a replaced task open.
+
+**Run fields.** A task can carry free string settings for whoever starts a worker on it, for example the profile, model or effort. They live under `run:` in the front matter and agmd does not interpret them. `--set run.<key>=<value>` sets one (repeatable, on `task new` and `task update`; an empty value clears it) and `--unset run.<key>` clears one (on `task update`); all changes of one command are written in one locked step. Keys are lowercase letters, digits, `-` and `_`; values are one line. `task show` prints `run: key=value, ...`, and `show --json`/`list --json` carry them as the object `"run"` (left out when empty). Move, replace and reopen keep them.
+
+```bash
+agmd task new ui-polish --set run.profile=frontend --set run.effort=high
+agmd task update ui-polish --set run.model=opus --unset run.effort
+```
 
 **Moving a task.** `agmd task move <task> --to-project <project>` moves a task that was filed in the wrong project. It keeps its name, id, text, fields (human flag, check, priority…), comments and `created_at`/`completed_at`; `updated_at` records the move and the task gets the comment `Moved from project '<from>'.` (`--author`, else `$AGMD_AUTHOR`, else `user`). The move holds the locks of both projects (taken in name order, so opposite moves cannot deadlock). It fails with `conflict` when the task has dependencies or dependents (they would cross projects; remove them with `task dep remove` first), when the target already has a task of that name or id, or while another workflow holds a claim on it; pass `--workflow-id` to move your own claim along. `--json` prints `{"ok":true,"action":"move","project":"<to>","from_project":"<from>",...}`. `task replace --by` still only accepts a task of the same project: move the replacement first if needed.
 

@@ -35,6 +35,8 @@ stdin), or from stdin when it is piped and no other change is given.
 --subject sets the title, -p/--priority 0-4, -t/--type bug|feature|task|chore,
 --feature (--feature "" clears it), --human (--human=false hands the task
 back to agents), --check sets a human task's check (--check "" clears it).
+--set run.<key>=<value> sets a free run field (profile, model, effort, ...;
+repeatable, an empty value clears it) and --unset run.<key> clears one.
 
 A completed task is refused with "invalid_transition" (status 5) unless
 --force is given.
@@ -46,6 +48,7 @@ Examples:
   agmd task update setup-db --subject "Set up the database" -p 1 -t feature
   agmd task update setup-db --feature ""      # Clear the feature
   agmd task update merge-pr --human --check "gh pr view 12 --json state -q .state | grep -qx MERGED"
+  agmd task update setup-db --set run.profile=frontend --unset run.model
   agmd task update setup-db --content "Fix the typo" --force   # Completed task`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeTaskName,
@@ -86,6 +89,8 @@ func init() {
 		c.Flags().StringVar(&taskContent, "content", "", "New task text (replaces the description)")
 		c.Flags().StringVar(&taskUpdateContentFile, "content-file", "", "Read the new task text from this file (- for stdin)")
 		c.Flags().BoolVarP(&taskForce, "force", "f", false, "Allow changing a completed task")
+		c.Flags().StringArrayVar(&taskSetFields, "set", nil, "Set a run field, run.<key>=<value> (repeatable; an empty value clears it)")
+		c.Flags().StringArrayVar(&taskUnsetFields, "unset", nil, "Clear a run field, run.<key> (repeatable)")
 		c.RegisterFlagCompletionFunc("priority", completePriorityFlag)
 		c.RegisterFlagCompletionFunc("type", completeTypeFlag)
 	}
@@ -100,11 +105,12 @@ type taskUpdate struct {
 	Feature  *string
 	Human    *bool
 	Check    *string
+	Run      runFieldChanges
 }
 
 func (u taskUpdate) empty() bool {
 	return u.Subject == nil && u.Content == nil && u.Priority == nil && u.Type == nil &&
-		u.Feature == nil && u.Human == nil && u.Check == nil
+		u.Feature == nil && u.Human == nil && u.Check == nil && u.Run.empty()
 }
 
 // readTaskUpdate collects the changes from the flags (and, for update,
@@ -145,6 +151,11 @@ func readTaskUpdate(cmd *cobra.Command, action string) (taskUpdate, error) {
 		check := strings.TrimSpace(taskCheck)
 		u.Check = &check
 	}
+	run, err := parseRunFieldFlags(taskSetFields, taskUnsetFields)
+	if err != nil {
+		return u, err
+	}
+	u.Run = run
 
 	contentSet := flags.Changed("content")
 	fileSet := flags.Changed("content-file")
@@ -173,7 +184,7 @@ func readTaskUpdate(cmd *cobra.Command, action string) (taskUpdate, error) {
 	}
 
 	if u.empty() {
-		return u, newTaskError("invalid_input", "specify at least one of --content, --content-file, --subject, --priority, --type, --feature, --human or --check")
+		return u, newTaskError("invalid_input", "specify at least one of --content, --content-file, --subject, --priority, --type, --feature, --human, --check, --set or --unset")
 	}
 	return u, nil
 }
@@ -238,6 +249,7 @@ func applyTaskUpdate(task *Task, u taskUpdate) ([]string, error) {
 			changes = append(changes, "check set")
 		}
 	}
+	changes = append(changes, applyRunFields(task, u.Run)...)
 	if task.Check != "" && !task.Human {
 		return nil, newTaskError("invalid_input", "task '%s' has a check but is not for the human: a check only applies to human tasks (add --human or clear it with --check \"\")", task.Name)
 	}

@@ -74,14 +74,18 @@ func ExecuteArgs(args []string) error {
 // This is required for in-process testing where the same Cobra command tree is
 // reused across multiple Execute() calls and flags would otherwise retain values.
 func resetFlags(cmd *cobra.Command) {
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		f.Value.Set(f.DefValue) //nolint:errcheck
+	reset := func(f *pflag.Flag) {
+		// Set on a slice or array flag appends (and "[]" would be taken as
+		// a value), so empty those with Replace.
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			sv.Replace([]string{}) //nolint:errcheck
+		} else {
+			f.Value.Set(f.DefValue) //nolint:errcheck
+		}
 		f.Changed = false
-	})
-	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) {
-		f.Value.Set(f.DefValue) //nolint:errcheck
-		f.Changed = false
-	})
+	}
+	cmd.Flags().VisitAll(reset)
+	cmd.PersistentFlags().VisitAll(reset)
 	for _, sub := range cmd.Commands() {
 		resetFlags(sub)
 	}
