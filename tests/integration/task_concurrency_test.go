@@ -517,3 +517,47 @@ func TestTaskConcurrency_ParallelCommentDeletesAreNotLost(t *testing.T) {
 		t.Errorf("comments left = %+v, want only the other author's", got)
 	}
 }
+
+func TestNoteConcurrency_ParallelNewSameTitleGetsDistinctSlugs(t *testing.T) {
+	setup(t)
+	const n = 8
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"note", "new", "--project", "p", "--title", "Shared idea", fmt.Sprintf("from agent %d", i)}
+	})
+	seen := map[string]bool{}
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("agent %d: %v", i, r.err)
+		}
+		seen[strings.TrimSpace(string(r.stdout))] = true
+	}
+	want := map[string]bool{"shared-idea": true}
+	for i := 2; i <= n; i++ {
+		want[fmt.Sprintf("shared-idea-%d", i)] = true
+	}
+	if len(seen) != n || fmt.Sprint(seen) != fmt.Sprint(want) {
+		t.Fatalf("slugs %v, want %v", seen, want)
+	}
+}
+
+func TestNoteConcurrency_ParallelAppendsAreNotLost(t *testing.T) {
+	registry := setup(t)
+	if _, err := runE(t, "note", "new", "--project", "p", "--title", "Log"); err != nil {
+		t.Fatal(err)
+	}
+	const n = 8
+	results := runParallel(t, n, func(i int) []string {
+		return []string{"note", "append", "log", fmt.Sprintf("line %d", i), "--project", "p"}
+	})
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("agent %d: %v", i, r.err)
+		}
+	}
+	got := readFile(t, filepath.Join(registry, "note", "p", "log.md"))
+	for i := 0; i < n; i++ {
+		if !strings.Contains(got, fmt.Sprintf("\nline %d\n", i)) {
+			t.Errorf("line %d lost:\n%s", i, got)
+		}
+	}
+}

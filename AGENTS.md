@@ -80,6 +80,9 @@ in one locked step; never leave a replaced task open.
   `board.js` (columns, cards, attention counts, keyboard, drag and drop,
   polling), `panel.js` (task panel), `runs.js` (run modal, console, runs list)
 - `PRODUCT.md` — product record used for design work
+- `cmd/note.go`, `cmd/note_store.go` — `agmd note` (the Agents app's notes,
+  `note/<project>/<slug>.md`; own lock: flock on `note/.lock`, format and slug
+  rule kept in step with the app's notes.py)
 - `cmd/task_completion.go` — shell completion for task names and flags
 - `pkg/registry` — resolves the data directory (`AGMD_HOME` or `~/.agmd`)
 - `tests/integration` — in-process CLI tests
