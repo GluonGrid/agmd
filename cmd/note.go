@@ -113,6 +113,9 @@ func noteText(cmd *cobra.Command, arg string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read stdin: %w", err)
 	}
+	if len(raw) > noteBodyMax { // refused, never cut: the read stops one byte past the limit
+		return "", newTaskError("invalid_input", "the text on stdin is too long (512 KB at most)")
+	}
 	return string(raw), nil
 }
 

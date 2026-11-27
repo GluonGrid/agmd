@@ -187,3 +187,32 @@ func TestNoteErrors(t *testing.T) {
 		t.Fatalf("symlink listed: %q", out)
 	}
 }
+
+func TestNoteAppendRefusesOversizedStdin(t *testing.T) {
+	reg := setup(t)
+	chdir(t)
+	if _, err := runE(t, "note", "new", "--project", "p", "--title", "Empty"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(reg, "note", "p", "empty.md")
+	before := readFile(t, path)
+
+	// blank lines first: on an empty note, trimming them would bring a cut text
+	// back under the limit, so only measuring before the trim refuses it
+	r, w, _ := os.Pipe()
+	go func() {
+		w.WriteString("\n\n\n" + strings.Repeat("a", 512*1024))
+		w.Close()
+	}()
+	old := os.Stdin
+	os.Stdin = r
+	_, err := runE(t, "note", "append", "empty", "-", "--project", "p")
+	os.Stdin = old
+	r.Close()
+	if err == nil || !strings.Contains(err.Error(), "512 KB") {
+		t.Fatalf("oversized stdin accepted: %v", err)
+	}
+	if readFile(t, path) != before {
+		t.Fatal("note changed")
+	}
+}

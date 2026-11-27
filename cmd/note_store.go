@@ -224,7 +224,11 @@ func parseNote(text string) (map[string]string, string) {
 	if end < 0 {
 		return meta, text
 	}
-	for _, line := range strings.Split(text[4:end], "\n") {
+	head := "" // "---\n---": the fences share the newline, as in notes.py (text[4:3] is "")
+	if end > 4 {
+		head = text[4:end]
+	}
+	for _, line := range strings.Split(head, "\n") {
 		k, v, ok := strings.Cut(line, ":")
 		if ok && noteMetaKeyRE.MatchString(strings.TrimSpace(k)) {
 			meta[strings.TrimSpace(k)] = strings.TrimSpace(v)
@@ -411,6 +415,9 @@ func createNote(reg *registry.Registry, project, title, body, tasks string) (*no
 
 // appendNote adds text as a new paragraph at the end of the note.
 func appendNote(reg *registry.Registry, project, slug, text string) (*note, error) {
+	if len(text) > noteBodyMax { // measured before the trim, so blank lines cannot hide a cut
+		return nil, newTaskError("invalid_input", "the text is too long (512 KB at most)")
+	}
 	text = strings.Trim(text, "\n")
 	if strings.TrimSpace(text) == "" {
 		return nil, newTaskError("invalid_input", "nothing to add")
