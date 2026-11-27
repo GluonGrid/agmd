@@ -137,6 +137,22 @@ The project is derived from the repository you run agmd in. In a Git worktree, a
 agmd task emoji 🚀                        # Show an emoji next to the project name
 ```
 
+## Notes
+
+`agmd note` reads and adds to the user's notes: one Markdown file per note at `~/.agmd/note/<project>/<slug>.md`, the same files as the Notes tab of the Agents app. The front matter carries `title`, `created`, `updated` (UTC) and an optional `tasks` list. Every write holds the one notes lock (flock on `~/.agmd/note/.lock`, the lock the app takes), so the app, agmd and other agents never overwrite each other. The project is resolved as for tasks (`--project`, `--repo-path`).
+
+```bash
+agmd note list                                 # slug, title, last updated (newest first)
+agmd note list --all                           # the projects that have notes
+agmd note show login-screen-inspiration        # the text, with the title as a heading
+agmd note new --title "API naming" "first line" # prints the slug: api-naming
+agmd note append api-naming -- "- [ ] check the docs"   # a TEXT starting with - goes after --
+echo "from stdin" | agmd note append api-naming -
+agmd note path api-naming                      # the file: read it, write only through agmd note
+```
+
+The slug is made from the title when the note is made and never changes: lowercase `a-z0-9` joined by `-`, at most 60 characters, `-2`, `-3` when the name is taken. agmd never deletes notes and never touches the app's pictures folder or `note/.trash/`.
+
 ## Agents
 
 agmd is built for several agents working on the same project at once. Each agent picks a workflow id and claims work with one command:
