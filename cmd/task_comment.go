@@ -42,6 +42,9 @@ Comments are shown, numbered from #1 (oldest), by 'agmd task show' and in
 the web board. --delete <n> removes comment n; a comment by another author
 is refused with "conflict" (status 6) unless you pass --force.
 
+A comment on a completed task is stored, but a warning on stderr says it is
+easily missed: reopen the task ('agmd task reopen') or file a new task.
+
 Examples:
   agmd task comment setup-db "Schema migrated, seeding next" --author agent-1
   git log -1 --format=%B | agmd task comment setup-db --author agent-1
@@ -113,6 +116,10 @@ func runTaskComment(cmd *cobra.Command, args []string) error {
 		if err := saveTaskAssignments(reg, projectName, assignments); err != nil {
 			return fmt.Errorf("failed to save assignments: %w", err)
 		}
+	}
+
+	if task.Status == "completed" {
+		fmt.Fprintf(os.Stderr, "warning: task '%s' is completed; this comment is easily missed. Run 'agmd task reopen %s' to continue the work, or file a new task\n", task.Name, task.Name)
 	}
 
 	if taskJSON {
