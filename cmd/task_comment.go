@@ -42,8 +42,8 @@ Comments are shown, numbered from #1 (oldest), by 'agmd task show' and in
 the web board. --delete <n> removes comment n; a comment by another author
 is refused with "conflict" (status 6) unless you pass --force.
 
-A completed task is refused with "conflict": reopen it ('agmd task reopen') or
-file a new task, or pass --force to comment anyway.
+A comment on a completed task is stored, but a warning on stderr says it is
+easily missed: reopen the task ('agmd task reopen') or file a new task.
 
 Examples:
   agmd task comment setup-db "Schema migrated, seeding next" --author agent-1
@@ -61,7 +61,7 @@ func init() {
 	taskCommentCmd.Flags().StringVar(&taskCommentAuthor, "author", "", "Comment author (default $AGMD_AUTHOR or \"user\")")
 	taskCommentCmd.Flags().StringVar(&taskContent, "content", "", "Comment body")
 	taskCommentCmd.Flags().IntVar(&taskCommentDelete, "delete", 0, "Delete comment number n (1 = oldest, as numbered by 'task show')")
-	taskCommentCmd.Flags().BoolVar(&taskForce, "force", false, "With --delete: delete a comment by another author; otherwise comment on a completed task anyway")
+	taskCommentCmd.Flags().BoolVar(&taskForce, "force", false, "With --delete: delete a comment by another author")
 }
 
 func runTaskComment(cmd *cobra.Command, args []string) error {
@@ -102,9 +102,6 @@ func runTaskComment(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if task.Status == "completed" && !taskForce {
-		return newTaskError("conflict", "task '%s' is completed; a comment on it is easily missed. Run 'agmd task reopen %s' first, or file a new task; pass --force to comment anyway", task.Name, task.Name)
-	}
 	comment, err := addTaskComment(reg, projectName, task.ID, author, body)
 	if err != nil {
 		return err
@@ -119,6 +116,10 @@ func runTaskComment(cmd *cobra.Command, args []string) error {
 		if err := saveTaskAssignments(reg, projectName, assignments); err != nil {
 			return fmt.Errorf("failed to save assignments: %w", err)
 		}
+	}
+
+	if task.Status == "completed" {
+		fmt.Fprintf(os.Stderr, "warning: task '%s' is completed; this comment is easily missed. Run 'agmd task reopen %s' to continue the work, or file a new task\n", task.Name, task.Name)
 	}
 
 	if taskJSON {

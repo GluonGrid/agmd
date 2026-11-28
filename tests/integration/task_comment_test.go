@@ -140,27 +140,26 @@ func TestTaskWeb_CommentEndpoint(t *testing.T) {
 	}
 }
 
-func TestTaskComment_CompletedTaskWarnsUnlessForced(t *testing.T) {
+func TestTaskComment_CompletedTaskWarnsButStores(t *testing.T) {
 	setup(t)
 	chdir(t)
 	run(t, "task", "new", "a", "--project", "p", "--content", "work")
 	run(t, "task", "status", "a", "completed", "--project", "p")
 
-	out, err := runE(t, "task", "comment", "a", "late note", "--project", "p")
-	if err == nil {
-		t.Fatalf("comment on completed task succeeded:\n%s", out)
+	out, err := runE(t, "task", "comment", "a", "Merged: abc", "--project", "p")
+	if err != nil {
+		t.Fatalf("comment on completed task failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "agmd task reopen") || !strings.Contains(err.Error(), "new task") {
-		t.Errorf("error does not name the way: %v", err)
-	}
-	if n := len(showComments(t, "p", "a")); n != 0 {
-		t.Errorf("refused comment was stored (%d comments)", n)
-	}
-
-	if _, err := runE(t, "task", "comment", "a", "late note", "--force", "--project", "p"); err != nil {
-		t.Fatalf("forced comment failed: %v", err)
+	if !strings.Contains(out, "agmd task reopen") || !strings.Contains(out, "new task") {
+		t.Errorf("warning does not name the way:\n%s", out)
 	}
 	if n := len(showComments(t, "p", "a")); n != 1 {
 		t.Errorf("got %d comments, want 1", n)
+	}
+
+	run(t, "task", "new", "b", "--project", "p", "--content", "work")
+	out, _ = runE(t, "task", "comment", "b", "note", "--project", "p")
+	if strings.Contains(out, "warning") {
+		t.Errorf("open task got a warning:\n%s", out)
 	}
 }
