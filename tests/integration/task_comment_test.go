@@ -139,3 +139,28 @@ func TestTaskWeb_CommentEndpoint(t *testing.T) {
 		t.Errorf("CLI sees comments %+v", got)
 	}
 }
+
+func TestTaskComment_CompletedTaskWarnsUnlessForced(t *testing.T) {
+	setup(t)
+	chdir(t)
+	run(t, "task", "new", "a", "--project", "p", "--content", "work")
+	run(t, "task", "status", "a", "completed", "--project", "p")
+
+	out, err := runE(t, "task", "comment", "a", "late note", "--project", "p")
+	if err == nil {
+		t.Fatalf("comment on completed task succeeded:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "agmd task reopen") || !strings.Contains(err.Error(), "new task") {
+		t.Errorf("error does not name the way: %v", err)
+	}
+	if n := len(showComments(t, "p", "a")); n != 0 {
+		t.Errorf("refused comment was stored (%d comments)", n)
+	}
+
+	if _, err := runE(t, "task", "comment", "a", "late note", "--force", "--project", "p"); err != nil {
+		t.Fatalf("forced comment failed: %v", err)
+	}
+	if n := len(showComments(t, "p", "a")); n != 1 {
+		t.Errorf("got %d comments, want 1", n)
+	}
+}

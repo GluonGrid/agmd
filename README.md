@@ -164,7 +164,7 @@ agmd task status setup-db completed                   # Finish it
 agmd task unassign setup-db                           # Release the claim (back to pending if unfinished)
 ```
 
-`task show` numbers comments from `#1` (oldest). `agmd task comment <task> --delete <n> --author <you>` deletes comment `n`; a comment by another author is refused with `conflict` unless you pass `--force` (for example to remove a personal detail an agent posted).
+`task show` numbers comments from `#1` (oldest). `agmd task comment <task> --delete <n> --author <you>` deletes comment `n`; a comment by another author is refused with `conflict` unless you pass `--force` (for example to remove a personal detail an agent posted). A comment on a completed task is refused with `conflict` (it is easily missed): reopen the task with `agmd task reopen`, or file a new task; `--force` comments anyway.
 
 `next --claim` atomically picks the highest-priority agent task (never a [human task](#human-tasks)) that is ready and unassigned, assigns it to the workflow and marks it `in_progress`; two agents never get the same task. If the workflow already holds an unfinished task, that task is returned instead (`"action":"resume"`), so a restarted agent picks up where it left off. Without `--claim`, `agmd task next` only shows the next task.
 
